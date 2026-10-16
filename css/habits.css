@@ -1,0 +1,354 @@
+/* ==========================================================================
+   HABITS.CSS — Aba 1: Grade de Hábitos, Células, Drag-and-Drop, Streak e Pontos
+   ========================================================================== */
+
+/* --- Grade Semanal de Hábitos --- */
+.g {
+  display: grid;
+  grid-template-columns: minmax(240px, 2.4fr) repeat(7, minmax(0, 1fr)) 96px;
+  align-items: center;
+}
+
+.hd {
+  position: sticky;
+  top: 0;
+  height: 64px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  z-index: 2;
+}
+
+.ttl {
+  font: 700 21px/1 var(--font-display);
+  letter-spacing: -0.2px;
+}
+
+.h {
+  border-bottom: 1px solid var(--line);
+}
+
+/* --- Coluna de Nome e Drag-and-Drop --- */
+.nm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 20px;
+  min-width: 0;
+}
+
+.nm span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.nm span[data-open] {
+  cursor: pointer;
+}
+
+.nm span[data-open]:hover {
+  text-decoration: underline;
+}
+
+.nm button {
+  opacity: 0;
+  color: var(--mute);
+  padding: 4px;
+  font-size: 13px;
+}
+
+.h:hover .nm button {
+  opacity: 1;
+}
+
+.grip {
+  cursor: grab;
+  color: var(--mute);
+  touch-action: none;
+  user-select: none;
+  padding: 4px 2px;
+  letter-spacing: -2px;
+  font-size: 13px;
+  opacity: 0.45;
+}
+
+.h:hover .grip {
+  opacity: 1;
+}
+
+.h.lift {
+  position: relative;
+  z-index: 5;
+  background: var(--bg);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  border-radius: 14px;
+  border-bottom-color: transparent;
+}
+
+body.dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+/* --- Cabeçalho dos Dias da Semana --- */
+.dh {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mute);
+  gap: 2px;
+}
+
+.dh em {
+  font-style: normal;
+  font-size: 14px;
+  color: var(--text);
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.dh.today {
+  color: var(--ring);
+}
+
+.dh.today em {
+  background: var(--ring);
+  color: #fff;
+}
+
+.dh.off,
+.d.off {
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+/* --- Células de Marcação Diária --- */
+.d {
+  height: 50px;
+  position: relative;
+  cursor: pointer;
+}
+
+.d i {
+  position: absolute;
+  inset: 8px 4px;
+  border-radius: 9px;
+  transition: background 0.15s;
+}
+
+.d:hover i {
+  background: var(--panel);
+}
+
+.d.on i {
+  background: var(--green);
+}
+
+.d.pl i {
+  left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.d.nr i {
+  right: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.d.x i {
+  background: var(--red);
+  color: var(--red);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.d.fut {
+  cursor: default;
+}
+
+.d.fut:hover i {
+  background: transparent;
+}
+
+/* --- Coluna de Ofensiva (Streak 🔥) --- */
+.st {
+  display: grid;
+  place-items: center;
+  text-align: center;
+  font-weight: 700;
+}
+
+.st small {
+  font-size: 10px;
+  color: var(--mute);
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+.fire {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 99px;
+  background: var(--panel);
+  font-size: 17px;
+  filter: grayscale(1);
+  opacity: 0.55;
+  transition: 0.15s;
+}
+
+.fire b {
+  font: 700 16px var(--font-display);
+  color: var(--text);
+}
+
+.fire.on {
+  filter: none;
+  opacity: 1;
+  background: rgba(255, 140, 0, 0.15);
+}
+
+.fire:hover {
+  filter: none;
+  opacity: 1;
+}
+
+/* --- Modal de Detalhes da Ofensiva (#fdlg) --- */
+#fdlg {
+  width: min(380px, 92vw);
+}
+
+.fbig {
+  text-align: center;
+  font-size: 44px;
+  line-height: 1;
+  margin: 14px 0;
+}
+
+.fbig b {
+  display: block;
+  font: 700 42px var(--font-display);
+  margin-top: 4px;
+}
+
+.fbig small {
+  font-size: 13px;
+  color: var(--mute);
+}
+
+.fr {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.fr span {
+  color: var(--mute);
+}
+
+/* --- Modal de Diagrama de Pontos Mensal (#ddlg) --- */
+.ph {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ph .m {
+  flex: 1;
+  text-align: center;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.pg {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  justify-items: center;
+  margin: 12px 0;
+}
+
+.pg b {
+  font-size: 11px;
+  color: var(--mute);
+}
+
+.dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--line);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.dot.on {
+  background: var(--green);
+  color: #fff;
+  font-weight: 700;
+}
+
+.dot.x {
+  background: rgba(229, 72, 77, 0.18);
+  color: var(--red);
+  font-weight: 700;
+}
+
+.dot.fut {
+  opacity: 0.4;
+}
+
+.dot.t {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+#pcount {
+  text-align: center;
+}
+
+.dot-check {
+  color: var(--green);
+}
+
+/* --- Responsivo (Aba Hábitos) --- */
+@media (max-width: 700px) {
+  .g {
+    grid-template-columns: minmax(130px, 1.6fr) repeat(7, minmax(0, 1fr)) 66px;
+  }
+
+  .fire {
+    padding: 5px 8px;
+    font-size: 14px;
+  }
+
+  .fire b {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 640px) {
+  .nm {
+    padding-left: 10px;
+  }
+
+  .st small {
+    font-size: 8px;
+  }
+}

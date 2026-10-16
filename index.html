@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Melhoria pessoal diária</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./css/main.css" onerror="this.onerror=null;this.href='https://marcos3436.github.io/habit-tracker/css/main.css'">
+</head>
+<body>
+  <div id="app">
+    <!-- Cabeçalho e Navegação Global -->
+    <header class="top">
+      <div class="logo">
+        <b></b>
+        <span>Melhoria pessoal diária</span>
+      </div>
+
+      <nav class="tabs" aria-label="Navegação principal">
+        <button type="button" class="tab on" id="tH">Hábitos</button>
+        <button type="button" class="tab" id="tD">Dashboard</button>
+        <button type="button" class="tab" id="tB">Banco de horas</button>
+      </nav>
+
+      <button type="button" class="add hv" id="new">+ Novo Hábito</button>
+
+      <div class="sp"></div>
+
+      <!-- Controles de Calendário (visíveis na aba Hábitos) -->
+      <div class="nav hv">
+        <button type="button" class="icon" id="pm" aria-label="Mês anterior">«</button>
+        <button type="button" class="icon" id="pw" aria-label="Semana anterior">‹</button>
+        <span class="m" id="mlabel"></span>
+        <button type="button" class="icon" id="nw" aria-label="Próxima semana">›</button>
+        <button type="button" class="icon" id="nm" aria-label="Próximo mês">»</button>
+        <button type="button" class="pill" id="today">Hoje</button>
+      </div>
+
+      <div class="sp"></div>
+
+      <!-- Ações Globais e Indicadores -->
+      <button type="button" class="pill" id="rbtn">📄 Relatório</button>
+      <button type="button" class="pill" id="cloud" title="Supabase">
+        ☁ <span id="cs">off</span>
+      </button>
+      <div class="pill" title="Melhor ofensiva geral">
+        🏆 <span id="best">0</span>
+      </div>
+      <button type="button" class="icon" id="theme" aria-label="Alternar tema">🌙</button>
+    </header>
+
+    <!-- Containers das 3 Abas Principais -->
+    <main class="main" id="main"></main>
+    <section class="main" id="dash" style="display:none"></section>
+    <section class="main" id="bank" style="display:none"></section>
+  </div>
+
+  <!-- Widget Flutuante: Tanque de Lazer (Aba Banco de Horas) -->
+  <aside class="tank" id="tank" style="display:none" title="1 crédito = 20 minutos de lazer" data-tip-delay="2000">
+    <strong>Tanque de lazer</strong>
+    <div class="tk">
+      <div class="lq" id="lq"></div>
+      <i class="mark-25"></i>
+      <i class="mark-50"></i>
+      <i class="mark-75"></i>
+    </div>
+    <div class="tkc" id="tkcw" data-tip="">
+      <b id="tkc">0</b> créditos
+    </div>
+    <div class="lz">
+      <input id="lzv" type="number" min="0" step="any" placeholder="Tempo">
+      <select id="lzu" aria-label="Unidade de tempo">
+        <option value="min">min</option>
+        <option value="h">horas</option>
+      </select>
+      <button type="button" id="lzb">OK</button>
+    </div>
+  </aside>
+
+  <!-- Tooltip Customizado (Popover API) -->
+  <div id="tip" popover="manual"></div>
+
+  <!-- Modal: Criar / Editar Hábito -->
+  <dialog id="dlg">
+    <strong id="dtitle" class="dialog-title"></strong>
+    <input id="dname" maxlength="40" placeholder="Ex: 2h de estudo" autocomplete="off">
+    <div class="acts">
+      <button type="button" class="del" id="ddel">Excluir</button>
+      <button type="button" id="dcancel">Cancelar</button>
+      <button type="button" class="ok" id="dok">Salvar</button>
+    </div>
+  </dialog>
+
+  <!-- Modal: Diagrama de Pontos Mensal do Hábito -->
+  <dialog id="ddlg">
+    <div class="dialog-header">
+      <strong id="pname" class="dialog-title"></strong>
+      <button type="button" class="icon" id="pclose" aria-label="Fechar">✕</button>
+    </div>
+    <div class="ph">
+      <button type="button" class="icon" id="ppm" aria-label="Mês anterior">‹</button>
+      <span class="m" id="pmonth"></span>
+      <button type="button" class="icon" id="pnm" aria-label="Próximo mês">›</button>
+    </div>
+    <div class="pg" id="pgrid"></div>
+    <p id="pcount"></p>
+  </dialog>
+
+  <!-- Modal: Detalhes da Ofensiva (Streak 🔥) -->
+  <dialog id="fdlg">
+    <div class="dialog-header">
+      <strong id="fname" class="dialog-title"></strong>
+      <button type="button" class="icon" id="fclose" aria-label="Fechar">✕</button>
+    </div>
+    <div id="fbody"></div>
+  </dialog>
+
+  <!-- Modal: Criar / Editar Atividade do Banco de Horas -->
+  <dialog id="bdlg">
+    <strong id="btitle" class="dialog-title"></strong>
+    <label class="lab" for="bname">Nome da atividade ou matéria</label>
+    <input id="bname" maxlength="60" placeholder="Ex: Cálculo I" autocomplete="off">
+    <label class="lab" for="bsize">Quantidade de quadradinhos</label>
+    <input id="bsize" type="number" min="1" max="200" value="10">
+    <label class="lab" for="bhours">Horas por quadradinho</label>
+    <input id="bhours" type="number" min="0.25" step="0.25" value="1">
+    <p id="bsum"></p>
+    <p id="berr" class="err"></p>
+    <div class="acts">
+      <button type="button" class="del" id="bdel">Excluir</button>
+      <button type="button" id="bcancel">Cancelar</button>
+      <button type="button" class="ok" id="bok">Salvar</button>
+    </div>
+  </dialog>
+
+  <!-- Modal: Relatório Mensal / Anual -->
+  <dialog id="rdlg">
+    <div class="dialog-header">
+      <strong class="dialog-title">Relatório de hábitos</strong>
+      <button type="button" class="icon" id="rclose" aria-label="Fechar">✕</button>
+    </div>
+    <div class="report-filters">
+      <select class="sel" id="rtype" aria-label="Tipo de relatório">
+        <option value="month">Mensal</option>
+        <option value="year">Anual</option>
+      </select>
+      <input class="sel" type="month" id="rmonth" aria-label="Mês do relatório">
+      <input class="sel" type="number" id="ryear" min="2000" max="2100" style="display:none" aria-label="Ano do relatório">
+    </div>
+    <div id="rpt"></div>
+    <div class="acts">
+      <button type="button" id="rcsv">⬇ CSV (Excel)</button>
+      <button type="button" class="ok" id="rprint">🖨 Imprimir / PDF</button>
+    </div>
+  </dialog>
+
+  <!-- Modal: Configuração da Nuvem (Supabase) -->
+  <dialog id="sdlg">
+    <strong class="dialog-title">Supabase</strong>
+    <p>Project URL e anon key (Project Settings → API). Rode antes o arquivo supabase.sql no SQL Editor.</p>
+    <input id="surl" placeholder="https://xxxx.supabase.co" autocomplete="off">
+    <input id="skey" placeholder="anon public key" autocomplete="off">
+    <div class="acts">
+      <button type="button" class="del" id="sclear">Desconectar</button>
+      <button type="button" id="scancel">Cancelar</button>
+      <button type="button" class="ok" id="sok">Salvar e sincronizar</button>
+    </div>
+  </dialog>
+
+  <!-- Modal Global de Confirmação -->
+  <dialog id="qdlg">
+    <p id="qmsg"></p>
+    <div class="acts">
+      <button type="button" id="qno">Cancelar</button>
+      <button type="button" class="ok" id="qyes">Excluir</button>
+    </div>
+  </dialog>
+
+  <!-- Área dedicada para Impressão (@media print) -->
+  <div id="pa"></div>
+
+  <!-- Carregamento Modular ES6 (padrão HTTP/HTTPS/PWA/Electron) com fallback automático para file:// e remoto -->
+  <script type="module" src="./js/main.js" onerror="
+    const s = document.createElement('script');
+    s.src = './js/file-fallback.js';
+    s.onerror = () => {
+      const r = document.createElement('script');
+      r.src = 'https://marcos3436.github.io/habit-tracker/js/file-fallback.js';
+      document.body.appendChild(r);
+    };
+    document.body.appendChild(s);
+  "></script>
+</body>
+</html>

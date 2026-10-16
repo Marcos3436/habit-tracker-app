@@ -1,0 +1,120 @@
+/* ==========================================================================
+   BASE.CSS — Design Tokens, Reset, Temas (Claro/Escuro) e Layout Estrutural
+   ========================================================================== */
+
+:root {
+  --bg: #ffffff;
+  --panel: #f3f4f7;
+  --line: #e6e8ec;
+  --text: #14171c;
+  --mute: #8a919c;
+  --green: #2fc86b;
+  --green-d: #1fa856;
+  --ring: #2f6bff;
+  --red: #e5484d;
+  --sw: 62px;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Outfit", system-ui, -apple-system, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101215;
+    --panel: #181b20;
+    --line: #262a31;
+    --text: #eceef1;
+    --mute: #7d8591;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #101215;
+  --panel: #181b20;
+  --line: #262a31;
+  --text: #eceef1;
+  --mute: #7d8591;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 var(--font-sans);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+  background: none;
+}
+
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.main::-webkit-scrollbar {
+  display: none;
+}
+
+.sp {
+  flex: 1;
+}
+
+.empty {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--mute);
+}
+
+.dp {
+  padding: 16px 20px;
+}
+
+.dp h2 {
+  font: 700 22px var(--font-display);
+  margin: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.section-header h2,
+.dialog-header strong {
+  flex: 1;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dialog-title {
+  font: 700 19px var(--font-display);
+}
+
+@media (max-width: 640px) {
+  :root {
+    --sw: 40px;
+  }
+}

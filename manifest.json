@@ -1,0 +1,10 @@
+{
+  "name": "Melhoria pessoal diária",
+  "short_name": "Rabitu",
+  "description": "Rastreador de hábitos diários, dashboard analítico, banco de horas de estudo e tanque de lazer.",
+  "lang": "pt-BR",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#101215",
+  "theme_color": "#2fc86b"
+}

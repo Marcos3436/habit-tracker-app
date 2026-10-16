@@ -1,0 +1,9 @@
+/* ==========================================================================
+   MAIN.CSS — Ponto de Entrada de Estilos (Arquitetura Modular CSS)
+   ========================================================================== */
+
+@import url("./base.css");
+@import url("./components.css");
+@import url("./habits.css");
+@import url("./dashboard.css");
+@import url("./bank.css");

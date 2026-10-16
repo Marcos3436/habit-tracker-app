@@ -1,0 +1,364 @@
+/* ==========================================================================
+   COMPONENTS.CSS — Cabeçalho, Abas, Botões, Modais, Relatórios, Tooltips e Print
+   ========================================================================== */
+
+/* --- Barra Superior (Header) --- */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 32px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 700 30px/1 var(--font-display);
+  letter-spacing: -0.3px;
+}
+
+.logo b {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--green);
+}
+
+.logo span {
+  background: linear-gradient(90deg, var(--green), var(--ring));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* --- Abas de Navegação --- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--panel);
+  padding: 4px;
+  border-radius: 99px;
+}
+
+.tab {
+  padding: 10px 22px;
+  border-radius: 99px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--mute);
+}
+
+.tab.on {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.dashmode .hv {
+  display: none;
+}
+
+/* --- Botões e Controles --- */
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  border-radius: 99px;
+  background: var(--panel);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--panel);
+  display: grid;
+  place-items: center;
+  flex: none;
+  font-size: 18px;
+}
+
+.pill:hover,
+.icon:hover {
+  filter: brightness(0.94);
+}
+
+.add {
+  background: var(--green);
+  color: #fff;
+  font-weight: 700;
+  padding: 11px 20px;
+  font-size: 15px;
+  border-radius: 12px;
+}
+
+.sel {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.lab {
+  display: block;
+  font-size: 12px;
+  color: var(--mute);
+  margin-top: 10px;
+  font-weight: 600;
+}
+
+/* --- Navegador de Semana/Mês --- */
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav .m {
+  min-width: 170px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+/* --- Modais (<dialog>) --- */
+dialog {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 20px;
+  width: min(400px, 92vw);
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+dialog input {
+  width: 100%;
+  padding: 10px 12px;
+  margin: 6px 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+dialog input.bad {
+  border-color: var(--red);
+}
+
+dialog p {
+  margin: 6px 0;
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.err {
+  color: var(--red);
+  font-size: 13px;
+  min-height: 18px;
+  margin: 6px 0 0;
+}
+
+.acts {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.acts button {
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--panel);
+  font-weight: 600;
+}
+
+.acts .ok {
+  background: var(--green);
+  color: #fff;
+}
+
+.acts .del {
+  color: var(--red);
+  margin-right: auto;
+}
+
+#qdlg {
+  width: min(360px, 92vw);
+}
+
+#qmsg {
+  color: var(--text);
+  font-size: 15px;
+  margin: 4px 0 14px;
+}
+
+#qyes.danger {
+  background: var(--red);
+}
+
+/* --- Relatório Modal e Tabela --- */
+#rdlg {
+  width: min(780px, 94vw);
+}
+
+#rdlg input,
+#rdlg select {
+  width: auto;
+  margin: 0;
+}
+
+.report-filters {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+
+#ryear {
+  width: 100px;
+}
+
+#rpt {
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.report-heading {
+  margin: 6px 0;
+  font-family: var(--font-display);
+}
+
+.report-sub {
+  color: var(--mute);
+  margin: 0 0 8px;
+}
+
+.rt {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rt th,
+.rt td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: center;
+}
+
+.rt th:first-child,
+.rt td:first-child {
+  text-align: left;
+}
+
+/* --- Tooltip Customizado (Popover API) --- */
+#tip {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--bg);
+  font: 500 13px/1.35 var(--font-display);
+  max-width: 280px;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  overflow: visible;
+}
+
+#tip:popover-open {
+  animation: tipin 0.14s ease-out;
+}
+
+@keyframes tipin {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+/* --- Área de Impressão --- */
+#pa {
+  display: none;
+}
+
+@media print {
+  #app,
+  dialog {
+    display: none !important;
+  }
+
+  html,
+  body {
+    overflow: visible;
+    height: auto;
+    background: #fff;
+  }
+
+  #pa {
+    display: block !important;
+    color: #000;
+    font-family: var(--font-sans);
+    padding: 16px;
+  }
+
+  #pa .rt th,
+  #pa .rt td {
+    border-bottom: 1px solid #bbb;
+  }
+}
+
+/* --- Responsivo (Barra Superior) --- */
+@media (max-width: 700px) {
+  .top {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .logo {
+    font-size: 20px;
+  }
+
+  .logo b {
+    width: 20px;
+    height: 20px;
+  }
+
+  .tab {
+    padding: 6px 14px;
+    font-size: 14px;
+  }
+
+  .pill {
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+
+  .icon {
+    width: 34px;
+    height: 34px;
+    font-size: 15px;
+  }
+
+  .nav .m {
+    min-width: 110px;
+    font-size: 14px;
+  }
+}

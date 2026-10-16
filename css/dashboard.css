@@ -1,0 +1,113 @@
+/* ==========================================================================
+   DASHBOARD.CSS — Aba 2: KPIs, Gráfico de Barras Empilhadas e Progresso
+   ========================================================================== */
+
+.kp {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.kc {
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.kc b {
+  display: block;
+  font: 700 26px/1.1 var(--font-display);
+}
+
+.kc small {
+  color: var(--mute);
+}
+
+/* --- Gráfico de Barras Empilhadas (Concluídos vs Falhas) --- */
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 130px;
+  margin: 8px 0 4px;
+}
+
+.bars i {
+  flex: 1;
+  background: var(--green);
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+}
+
+.bc {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column-reverse;
+  border-bottom: 2px solid var(--line);
+}
+
+.bars .bc i {
+  flex: none;
+  display: block;
+  border-radius: 0;
+  min-height: 0;
+}
+
+.bars .bc i.r {
+  background: var(--red);
+}
+
+.bl {
+  display: flex;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--mute);
+}
+
+.bl span {
+  flex: 1;
+  text-align: center;
+}
+
+/* --- Lista de Progresso por Hábito --- */
+.dash-section-title {
+  display: block;
+  margin-top: 18px;
+}
+
+.pr {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) 3fr 48px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.pr-name {
+  font-weight: 600;
+}
+
+.pr-streak {
+  text-align: right;
+  font: 700 18px var(--font-display);
+}
+
+.pb {
+  height: 10px;
+  background: var(--line);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.pb i {
+  display: block;
+  height: 100%;
+  background: var(--green);
+}
+
+.muted-msg {
+  color: var(--mute);
+}
