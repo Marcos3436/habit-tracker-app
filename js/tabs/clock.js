@@ -5,13 +5,16 @@
  */
 
 import { keyOf, todayN } from '../core/dates.js';
-import { $ } from '../core/dom.js';
-import { saveFocus, state } from '../core/state.js';
+import { $, esc, uid } from '../core/dom.js';
+import { DEFAULT_TIMERS, saveFocus, state } from '../core/state.js';
 import { pushFocus, quiet } from '../core/supabase.js';
 
 export const MIN_SESSION_MIN = 15;
 export const MAX_SESSION_MIN = 240;
 export const SESSION_STEP_MIN = 15;
+
+export const TCARD_RADIUS = 86;
+export const TCARD_CIRC = 2 * Math.PI * TCARD_RADIUS;
 
 /**
  * Catálogo de opções de som de alarme sintetizados via Web Audio API.
@@ -156,6 +159,78 @@ export function formatCountdown(totalSeconds) {
   const secs = s % 60;
   const pad = (n) => String(n).padStart(2, '0');
   return hrs > 0 ? `${pad(hrs)}:${pad(mins)}:${pad(secs)}` : `${pad(mins)}:${pad(secs)}`;
+}
+
+/**
+ * Formata segundos sempre em 'HH:MM:SS' (padrão visual dos cartões de Temporizador).
+ * @param {number} totalSeconds
+ * @returns {string}
+ */
+export function formatTimerHMS(totalSeconds) {
+  const s = Math.max(0, Math.ceil(+totalSeconds || 0));
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+}
+
+/**
+ * Converte (horas, minutos, segundos) em total de segundos válidos (0 se vazio/inválido, máx 99:59:59).
+ * @param {number} [hours=0]
+ * @param {number} [minutes=0]
+ * @param {number} [seconds=0]
+ * @returns {number}
+ */
+export function calcTimerDurationSec(hours = 0, minutes = 0, seconds = 0) {
+  const h = Math.max(0, Math.min(99, Math.floor(+hours || 0)));
+  const m = Math.max(0, Math.min(59, Math.floor(+minutes || 0)));
+  const s = Math.max(0, Math.min(59, Math.floor(+seconds || 0)));
+  const total = h * 3600 + m * 60 + s;
+  return total > 0 ? Math.min(359999, total) : 0;
+}
+
+/**
+ * Decompõe um total de segundos em { hours, minutes, seconds }.
+ * @param {number} totalSeconds
+ * @returns {{hours: number, minutes: number, seconds: number}}
+ */
+export function splitTimerDurationHMS(totalSeconds) {
+  const s = Math.max(0, Math.round(+totalSeconds || 0));
+  return {
+    hours: Math.floor(s / 3600),
+    minutes: Math.floor((s % 3600) / 60),
+    seconds: s % 60,
+  };
+}
+
+/**
+ * Calcula a proporção e o stroke-dashoffset do anel circular de um temporizador.
+ * @param {number} remainingSec
+ * @param {number} durationSec
+ * @param {number} [circumference=TCARD_CIRC]
+ * @returns {{remainingSec: number, ratio: number, dashOffset: number}}
+ */
+export function calcTimerProgress(remainingSec, durationSec, circumference = TCARD_CIRC) {
+  const dur = Math.max(1, +durationSec || 1);
+  const rem = Math.max(0, Math.min(dur, +remainingSec || 0));
+  const ratio = rem / dur;
+  const dashOffset = circumference * (1 - ratio);
+  return { remainingSec: rem, ratio, dashOffset };
+}
+
+/**
+ * Monta a notificação do Windows quando um temporizador chega a 00:00:00.
+ * @param {string} timerName
+ * @param {number} durationSec
+ * @returns {{title: string, body: string}}
+ */
+export function buildTimerNotification(timerName, durationSec) {
+  const safeName = String(timerName || 'Temporizador').trim() || 'Temporizador';
+  return {
+    title: '⏰ Temporizador concluído!',
+    body: `O temporizador "${safeName}" (${formatTimerHMS(durationSec)}) chegou ao fim.`,
+  };
 }
 
 /* ==========================================================================
@@ -316,11 +391,26 @@ export async function sendWindowsNotification(title, body) {
 }
 
 /* ==========================================================================
-   3. MOTOR DE EXECUÇÃO DA SESSÃO (State Machine sem Drift)
+   3. MOTOR DE EXECUÇÃO DA SESSÃO E TEMPORIZADORES (State Machine sem Drift)
    ========================================================================== */
 
 let activeSession = null;
 let tickInterval = null;
+let editingTimerId = null;
+let expandedTimerId = null;
+
+/**
+ * Estado em memória de cada temporizador:
+ * Map<timerId, { running: boolean, accumulatedSec: number, lastResumeAt: number, finished: boolean }>
+ */
+const timerRuntime = new Map();
+
+function ensureTimersArray() {
+  if (!Array.isArray(state.focus.timers)) {
+    state.focus.timers = DEFAULT_TIMERS.map((t) => ({ ...t }));
+  }
+  return state.focus.timers;
+}
 
 function persistAndSyncFocus() {
   state.focus.at = Date.now();
@@ -401,21 +491,150 @@ export function advanceSessionStep() {
   drawClock();
 }
 
-function onTimerTick() {
-  if (!activeSession || activeSession.paused) return;
-  const step = activeSession.plan.steps[activeSession.stepIdx];
-  if (!step) return;
+/* --- Temporizadores individuais --- */
 
-  const totalSec = step.minutes * 60;
-  const elapsedSec = getPhaseElapsedSec();
-  creditElapsedFocusMinutes(false);
+function getTimerElapsedSec(id) {
+  const rt = timerRuntime.get(id);
+  if (!rt) return 0;
+  const delta = rt.running ? (Date.now() - rt.lastResumeAt) / 1000 : 0;
+  return rt.accumulatedSec + delta;
+}
 
-  if (elapsedSec >= totalSec) {
-    advanceSessionStep();
-    return;
+export function getTimerRemainingSec(timer) {
+  if (!timer) return 0;
+  const rt = timerRuntime.get(timer.id);
+  if (!rt) return timer.durationSec;
+  if (rt.finished) return 0;
+  return Math.max(0, timer.durationSec - getTimerElapsedSec(timer.id));
+}
+
+function hasAnyRunningTimer() {
+  for (const rt of timerRuntime.values()) {
+    if (rt && rt.running) return true;
+  }
+  return false;
+}
+
+function countRunningTimers() {
+  let c = 0;
+  for (const rt of timerRuntime.values()) {
+    if (rt && rt.running) c++;
+  }
+  return c;
+}
+
+function ensureTickLoop() {
+  const sessionRunning = !!(activeSession && !activeSession.paused);
+  const timersRunning = hasAnyRunningTimer();
+  if (sessionRunning || timersRunning) {
+    if (!tickInterval) {
+      tickInterval = setInterval(onTimerTick, 200);
+    }
+  } else if (tickInterval) {
+    clearInterval(tickInterval);
+    tickInterval = null;
+  }
+}
+
+export function completeTimer(timerId) {
+  const timers = ensureTimersArray();
+  const timer = timers.find((t) => t.id === timerId);
+  if (!timer) return;
+
+  timerRuntime.set(timerId, {
+    running: false,
+    accumulatedSec: timer.durationSec,
+    lastResumeAt: 0,
+    finished: true,
+  });
+
+  playAlarmSound();
+  const note = buildTimerNotification(timer.name, timer.durationSec);
+  sendWindowsNotification(note.title, note.body);
+
+  ensureTickLoop();
+  drawClock();
+}
+
+export function toggleTimer(timerId) {
+  const timers = ensureTimersArray();
+  const timer = timers.find((t) => t.id === timerId);
+  if (!timer) return;
+
+  const rt = timerRuntime.get(timerId) || {
+    running: false,
+    accumulatedSec: 0,
+    lastResumeAt: 0,
+    finished: false,
+  };
+
+  if (rt.running) {
+    rt.accumulatedSec = getTimerElapsedSec(timerId);
+    rt.running = false;
+    timerRuntime.set(timerId, rt);
+  } else {
+    if (rt.finished || getTimerRemainingSec(timer) <= 0) {
+      rt.accumulatedSec = 0;
+      rt.finished = false;
+    }
+    rt.running = true;
+    rt.lastResumeAt = Date.now();
+    timerRuntime.set(timerId, rt);
   }
 
-  updateActiveTimerDOM(totalSec - elapsedSec, totalSec);
+  ensureTickLoop();
+  drawClock();
+}
+
+export function resetTimer(timerId) {
+  timerRuntime.delete(timerId);
+  ensureTickLoop();
+  drawClock();
+}
+
+function updateTimerCardDOM(timer) {
+  const rem = getTimerRemainingSec(timer);
+  const prog = calcTimerProgress(rem, timer.durationSec);
+  const digitsEl = $(`tcard-digits-${timer.id}`);
+  const arcEl = $(`tcard-arc-${timer.id}`);
+  if (digitsEl) digitsEl.textContent = formatTimerHMS(rem);
+  if (arcEl) {
+    arcEl.style.strokeDashoffset = String(prog.dashOffset);
+    arcEl.classList.add('is-active');
+  }
+}
+
+function onTimerTick() {
+  // 1. Atualiza sessão de concentração (se ativa)
+  if (activeSession && !activeSession.paused) {
+    const step = activeSession.plan.steps[activeSession.stepIdx];
+    if (step) {
+      const totalSec = step.minutes * 60;
+      const elapsedSec = getPhaseElapsedSec();
+      creditElapsedFocusMinutes(false);
+
+      if (elapsedSec >= totalSec) {
+        advanceSessionStep();
+      } else {
+        updateActiveTimerDOM(totalSec - elapsedSec, totalSec);
+      }
+    }
+  }
+
+  // 2. Atualiza temporizadores em execução
+  const timers = ensureTimersArray();
+  for (const timer of timers) {
+    const rt = timerRuntime.get(timer.id);
+    if (!rt || !rt.running) continue;
+    const rem = timer.durationSec - getTimerElapsedSec(timer.id);
+    if (rem <= 0) {
+      completeTimer(timer.id);
+    } else {
+      updateTimerCardDOM(timer);
+    }
+  }
+
+  ensureTickLoop();
 }
 
 export function startFocusSession() {
@@ -435,8 +654,7 @@ export function startFocusSession() {
     creditedMinInStep: 0,
     lastResumeAt: Date.now(),
   };
-  clearInterval(tickInterval);
-  tickInterval = setInterval(onTimerTick, 250);
+  ensureTickLoop();
   drawClock();
 }
 
@@ -450,6 +668,7 @@ export function togglePauseSession() {
     activeSession.paused = true;
     creditElapsedFocusMinutes(false);
   }
+  ensureTickLoop();
   drawClock();
 }
 
@@ -457,9 +676,15 @@ export function stopFocusSession(flushPartial = true) {
   if (activeSession && flushPartial) {
     creditElapsedFocusMinutes(false);
   }
-  clearInterval(tickInterval);
-  tickInterval = null;
   activeSession = null;
+  ensureTickLoop();
+  drawClock();
+}
+
+export function switchClockSubtab(subtab) {
+  const next = subtab === 'timer' ? 'timer' : 'focus';
+  state.focus.subtab = next;
+  saveFocus();
   drawClock();
 }
 
@@ -518,6 +743,45 @@ function alarmLabelOf(focus) {
   const id = resolveAlarmId(focus);
   const found = ALARM_SOUNDS.find((s) => s.id === id);
   return found ? found.label : 'Sino Suave (Chime)';
+}
+
+function renderClockSidebar() {
+  const sub = state.focus.subtab === 'timer' ? 'timer' : 'focus';
+  const runningTimers = countRunningTimers();
+  const focusRunning = !!(activeSession && !activeSession.paused);
+
+  return `
+    <aside class="clock-sidebar" aria-label="Menu do Relógio">
+      <div class="clock-sidebar-brand">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"></circle>
+          <polyline points="12 7 12 12 15.5 14"></polyline>
+        </svg>
+        <span>Relógio</span>
+      </div>
+
+      <button type="button" class="clock-nav-item ${sub === 'focus' ? 'active' : ''}" id="clk-nav-focus">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9"></circle>
+          <circle cx="12" cy="12" r="5" stroke-dasharray="3 3"></circle>
+          <circle cx="12" cy="12" r="1.5" fill="currentColor"></circle>
+        </svg>
+        <span>Sessões de concentração</span>
+        ${focusRunning ? '<span class="clock-nav-badge" title="Sessão ativa">●</span>' : ''}
+      </button>
+
+      <button type="button" class="clock-nav-item ${sub === 'timer' ? 'active' : ''}" id="clk-nav-timer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 3h14"></path>
+          <path d="M5 21h14"></path>
+          <path d="M7 3v4a5 5 0 0 0 5 5 5 5 0 0 0 5-5V3"></path>
+          <path d="M7 21v-4a5 5 0 0 1 5-5 5 5 0 0 1 5 5v4"></path>
+        </svg>
+        <span>Temporizador</span>
+        ${runningTimers > 0 ? `<span class="clock-nav-badge" title="Temporizadores ativos">${runningTimers}</span>` : ''}
+      </button>
+    </aside>
+  `;
 }
 
 function renderLeftCardContent() {
@@ -648,18 +912,12 @@ function renderLeftCardContent() {
   `;
 }
 
-/**
- * Renderiza a aba completa do Relógio de Foco (#clock).
- */
-export function drawClock() {
-  const clockEl = $('clock');
-  if (!clockEl) return;
-
+function renderFocusView() {
   const st = calcDailyFocusStats(state.focus.history, state.focus.dailyGoalMin);
   const gDisp = formatGoalDisplay(st.goalMin);
   const goalDashOffset = GOAL_CIRC * (1 - st.progressPct / 100);
 
-  clockEl.innerHTML = `
+  return `
     <div class="clock-wrap">
       <div class="clock-grid">
         <!-- Card Esquerdo: Sessão de Concentração -->
@@ -718,6 +976,160 @@ export function drawClock() {
             🎉 Parabéns! Você bateu sua meta diária de foco hoje!
           </div>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTimerCard(timer, isExpanded) {
+  const rt = timerRuntime.get(timer.id) || {
+    running: false,
+    accumulatedSec: 0,
+    lastResumeAt: 0,
+    finished: false,
+  };
+  const remainingSec = getTimerRemainingSec(timer);
+  const isRunning = !!rt.running;
+  const isFinished = !!rt.finished;
+  const hasStarted = isRunning || rt.accumulatedSec > 0 || isFinished;
+  const prog = calcTimerProgress(isFinished ? timer.durationSec : remainingSec, timer.durationSec);
+  const idEsc = esc(timer.id);
+
+  return `
+    <div class="timer-card ${isExpanded ? 'is-expanded' : ''}" data-timer-card="${idEsc}">
+      <div class="timer-card-top">
+        <span class="timer-card-name" title="${esc(timer.name)}">${esc(timer.name)}</span>
+        <div class="timer-card-actions">
+          <button
+            type="button"
+            class="clock-icon-btn"
+            data-expand-timer="${idEsc}"
+            data-tip="${isExpanded ? 'Restaurar visualização em grade' : 'Expandir temporizador'}"
+            aria-label="${isExpanded ? 'Restaurar' : 'Expandir'}"
+          >
+            ${
+              isExpanded
+                ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`
+                : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>`
+            }
+          </button>
+          <button
+            type="button"
+            class="clock-icon-btn"
+            data-edit-timer="${idEsc}"
+            data-tip="Editar temporizador"
+            aria-label="Editar temporizador"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="tcard-ring-wrap" data-edit-timer="${idEsc}" data-tip="Editar temporizador">
+        <svg class="tcard-ring-svg" viewBox="0 0 208 208">
+          <circle class="tcard-ring-bg" cx="104" cy="104" r="${TCARD_RADIUS}"></circle>
+          <circle
+            class="tcard-ring-fg ${hasStarted ? 'is-active' : ''} ${isFinished ? 'is-finished' : ''}"
+            id="tcard-arc-${idEsc}"
+            cx="104"
+            cy="104"
+            r="${TCARD_RADIUS}"
+            stroke-dasharray="${TCARD_CIRC}"
+            stroke-dashoffset="${prog.dashOffset}"
+          ></circle>
+        </svg>
+        <div class="tcard-center">
+          <strong class="tcard-digits" id="tcard-digits-${idEsc}">${formatTimerHMS(remainingSec)}</strong>
+          <span class="tcard-sub ${isFinished ? 'done' : ''}" id="tcard-sub-${idEsc}">
+            ${isFinished ? '🔔 Tempo esgotado!' : !isRunning && hasStarted ? 'Pausado' : ''}
+          </span>
+        </div>
+      </div>
+
+      <div class="timer-card-controls">
+        <button
+          type="button"
+          class="tcard-play-btn"
+          id="tcard-play-${idEsc}"
+          data-play-timer="${idEsc}"
+          data-tip="${isRunning ? 'Pausar temporizador' : 'Iniciar temporizador'}"
+          aria-label="${isRunning ? 'Pausar' : 'Iniciar'}"
+        >
+          ${isRunning ? '⏸' : '▶'}
+        </button>
+        <button
+          type="button"
+          class="tcard-reset-btn"
+          id="tcard-reset-${idEsc}"
+          data-reset-timer="${idEsc}"
+          data-tip="Reiniciar temporizador"
+          aria-label="Reiniciar"
+          ${!hasStarted ? 'disabled' : ''}
+        >
+          ↺
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderTimersView() {
+  const timers = ensureTimersArray();
+  const alarmLabel = alarmLabelOf(state.focus);
+  const visibleTimers =
+    expandedTimerId && timers.some((t) => t.id === expandedTimerId)
+      ? timers.filter((t) => t.id === expandedTimerId)
+      : timers;
+  const isExpandedMode = visibleTimers.length === 1 && expandedTimerId === visibleTimers[0].id;
+
+  const cardsHtml = timers.length
+    ? visibleTimers.map((t) => renderTimerCard(t, isExpandedMode)).join('')
+    : `<div class="timers-empty">Nenhum temporizador cadastrado. Clique em <b>+ Adicionar temporizador</b> para criar o primeiro!</div>`;
+
+  return `
+    <div class="timers-wrap">
+      <div class="timers-toolbar">
+        <span class="timers-toolbar-title">Temporizador</span>
+        <div class="timers-toolbar-actions">
+          <button type="button" class="alarm-open-btn" id="clk-timer-alarm-btn" title="Escolher e testar o som do alarme">
+            🔔 Alarme: <b>${alarmLabel}</b> <span aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="timers-add-btn" id="clk-add-timer-btn">
+            <span>＋</span>
+            <span>Adicionar temporizador</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="timers-grid ${isExpandedMode ? 'has-expanded' : ''}" id="clk-timers-grid">
+        ${cardsHtml}
+      </div>
+
+      <button
+        type="button"
+        class="timers-fab"
+        id="clk-fab-add-timer"
+        data-tip="Adicionar novo temporizador"
+        aria-label="Adicionar novo temporizador"
+      >＋</button>
+    </div>
+  `;
+}
+
+/**
+ * Renderiza a aba completa do Relógio de Foco (#clock) com painel lateral e visão ativa.
+ */
+export function drawClock() {
+  const clockEl = $('clock');
+  if (!clockEl) return;
+
+  const sub = state.focus.subtab === 'timer' ? 'timer' : 'focus';
+
+  clockEl.innerHTML = `
+    <div class="clock-shell">
+      ${renderClockSidebar()}
+      <div class="clock-content">
+        ${sub === 'timer' ? renderTimersView() : renderFocusView()}
       </div>
     </div>
   `;
@@ -825,7 +1237,87 @@ async function testNotification() {
   }
 }
 
+/* --- Modal de Criar / Editar Temporizador (#tdlg) --- */
+
+export function openTimerModal(timerId = null) {
+  const dlg = $('tdlg');
+  if (!dlg) return;
+  const timers = ensureTimersArray();
+  const existing = timerId ? timers.find((t) => t.id === timerId) : null;
+  editingTimerId = existing ? existing.id : null;
+
+  $('ttitle').textContent = existing ? 'Editar temporizador' : 'Novo temporizador';
+  $('tname').value = existing ? existing.name : '';
+  const hms = splitTimerDurationHMS(existing ? existing.durationSec : 1800);
+  $('thours').value = String(hms.hours);
+  $('tmins').value = String(hms.minutes);
+  $('tsecs').value = String(hms.seconds);
+  $('terr').textContent = '';
+  $('tdel').style.display = existing ? '' : 'none';
+  dlg.showModal();
+  $('tname').focus();
+}
+
+function saveTimerModal() {
+  const dlg = $('tdlg');
+  if (!dlg) return;
+  const durSec = calcTimerDurationSec($('thours').value, $('tmins').value, $('tsecs').value);
+  if (durSec <= 0) {
+    $('terr').textContent = 'Defina um tempo maior que zero (ex.: 15 minutos).';
+    return;
+  }
+
+  const rawName = $('tname').value.trim();
+  const fallbackName = formatTimerHMS(durSec);
+  const name = (rawName || fallbackName).slice(0, 40);
+  const timers = ensureTimersArray();
+
+  if (editingTimerId) {
+    const t = timers.find((x) => x.id === editingTimerId);
+    if (t) {
+      t.name = name;
+      if (t.durationSec !== durSec) {
+        t.durationSec = durSec;
+        timerRuntime.delete(t.id);
+      }
+    }
+  } else {
+    timers.push({
+      id: 't-' + uid(),
+      name,
+      durationSec: durSec,
+    });
+  }
+
+  editingTimerId = null;
+  ensureTickLoop();
+  persistAndSyncFocus();
+  dlg.close();
+  drawClock();
+}
+
+function deleteTimerFromModal() {
+  if (!editingTimerId) return;
+  const timers = ensureTimersArray();
+  const idx = timers.findIndex((t) => t.id === editingTimerId);
+  if (idx >= 0) timers.splice(idx, 1);
+  timerRuntime.delete(editingTimerId);
+  if (expandedTimerId === editingTimerId) expandedTimerId = null;
+  editingTimerId = null;
+  ensureTickLoop();
+  persistAndSyncFocus();
+  $('tdlg').close();
+  drawClock();
+}
+
 function bindClockViewEvents() {
+  // Painel lateral de navegação (Sessões de concentração <-> Temporizador)
+  const navFocus = $('clk-nav-focus');
+  const navTimer = $('clk-nav-timer');
+  if (navFocus) navFocus.onclick = () => switchClockSubtab('focus');
+  if (navTimer) navTimer.onclick = () => switchClockSubtab('timer');
+
+  // Eventos da aba Sessões de concentração
   const incBtn = $('clk-inc');
   const decBtn = $('clk-dec');
   const skipChk = $('clk-skip-chk');
@@ -853,6 +1345,42 @@ function bindClockViewEvents() {
   if (stopBtn) stopBtn.onclick = () => stopFocusSession(true);
   if (editGoalBtn) editGoalBtn.onclick = openGoalModal;
   if (cfgBtn) cfgBtn.onclick = openClockConfigModal;
+
+  // Eventos da aba Temporizador
+  const timerAlarmBtn = $('clk-timer-alarm-btn');
+  const addTimerBtn = $('clk-add-timer-btn');
+  const fabAddTimer = $('clk-fab-add-timer');
+  const timersGrid = $('clk-timers-grid');
+
+  if (timerAlarmBtn) timerAlarmBtn.onclick = openClockConfigModal;
+  if (addTimerBtn) addTimerBtn.onclick = () => openTimerModal(null);
+  if (fabAddTimer) fabAddTimer.onclick = () => openTimerModal(null);
+
+  if (timersGrid) {
+    timersGrid.onclick = (e) => {
+      const playBtn = e.target.closest('[data-play-timer]');
+      if (playBtn) {
+        toggleTimer(playBtn.dataset.playTimer);
+        return;
+      }
+      const resetBtn = e.target.closest('[data-reset-timer]');
+      if (resetBtn) {
+        resetTimer(resetBtn.dataset.resetTimer);
+        return;
+      }
+      const expandBtn = e.target.closest('[data-expand-timer]');
+      if (expandBtn) {
+        const id = expandBtn.dataset.expandTimer;
+        expandedTimerId = expandedTimerId === id ? null : id;
+        drawClock();
+        return;
+      }
+      const editBtn = e.target.closest('[data-edit-timer]');
+      if (editBtn) {
+        openTimerModal(editBtn.dataset.editTimer);
+      }
+    };
+  }
 }
 
 /**
@@ -882,6 +1410,33 @@ export function initClockTab() {
     if (nbtn) nbtn.onclick = testNotification;
     cdlg.addEventListener('click', (e) => {
       if (e.target === cdlg) cdlg.close();
+    });
+  }
+
+  const tdlg = $('tdlg');
+  if (tdlg) {
+    $('tok').onclick = saveTimerModal;
+    $('tcancel').onclick = () => tdlg.close();
+    $('tdel').onclick = deleteTimerFromModal;
+    $('tname').onkeydown = (e) => {
+      if (e.key === 'Enter') saveTimerModal();
+    };
+    const presets = $('tpresets');
+    if (presets) {
+      presets.onclick = (e) => {
+        const btn = e.target.closest('[data-sec]');
+        if (!btn) return;
+        const hms = splitTimerDurationHMS(+btn.dataset.sec);
+        $('thours').value = String(hms.hours);
+        $('tmins').value = String(hms.minutes);
+        $('tsecs').value = String(hms.seconds);
+        if (!$('tname').value.trim()) {
+          $('tname').value = btn.textContent.trim();
+        }
+      };
+    }
+    tdlg.addEventListener('click', (e) => {
+      if (e.target === tdlg) tdlg.close();
     });
   }
 }

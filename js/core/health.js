@@ -10,14 +10,20 @@ import { $, DEFAULT_TIP_DELAY, esc } from './dom.js';
 import { HABCREDIT, HABMIN, MINS, PER, state, stats } from './state.js';
 import {
   ALARM_SOUNDS,
+  TCARD_CIRC,
   buildPhaseNotification,
   buildSessionPlan,
+  buildTimerNotification,
   calcDailyFocusStats,
   calcFocusIntervals,
+  calcTimerDurationSec,
+  calcTimerProgress,
   formatCountdown,
   formatGoalDisplay,
+  formatTimerHMS,
   justReachedGoal,
   resolveAlarmId,
+  splitTimerDurationHMS,
 } from '../tabs/clock.js';
 
 /**
@@ -168,6 +174,26 @@ export function runHealthCheck(options = {}) {
     assert(justReachedGoal(10, 50, 240) === false, 'Abaixo da meta: sem parabéns');
   });
 
+  // 6c. Temporizador: formatação HH:MM:SS, conversão de duração, anel de progresso e notificação
+  test('Temporizador: formatação HH:MM:SS, cálculo de duração e progresso circular', () => {
+    assert(formatTimerHMS(1805) === '00:30:05', '1805s deve formatar como 00:30:05');
+    assert(formatTimerHMS(1478) === '00:24:38', '1478s deve formatar como 00:24:38');
+    assert(formatTimerHMS(0) === '00:00:00', '0s deve formatar como 00:00:00');
+    assert(calcTimerDurationSec(0, 30, 5) === 1805, '0h 30m 5s deve ser 1805s');
+    assert(calcTimerDurationSec(1, 0, 0) === 3600, '1h deve ser 3600s');
+    assert(calcTimerDurationSec(0, 0, 0) === 0, '0h 0m 0s deve retornar 0');
+
+    const hms = splitTimerDurationHMS(3665);
+    assert(hms.hours === 1 && hms.minutes === 1 && hms.seconds === 5, 'splitTimerDurationHMS deve separar 1h 1m 5s');
+
+    const pHalf = calcTimerProgress(900, 1800, TCARD_CIRC);
+    assert(Math.abs(pHalf.ratio - 0.5) < 1e-6, 'Proporção em metade do tempo deve ser 0.5');
+    assert(Math.abs(pHalf.dashOffset - TCARD_CIRC * 0.5) < 1e-4, 'dashOffset em 50% deve ser metade da circunferência');
+
+    const tn = buildTimerNotification('CALC II', 1800);
+    assert(tn.title.includes('Temporizador') && tn.body.includes('CALC II') && tn.body.includes('00:30:00'), 'Notificação de temporizador deve incluir nome e duração');
+  });
+
   // 7. Integridade do Estado e DOM (quando no navegador)
   if (checkDOM) {
     test('Integridade do DOM, Identidade "Rabitu" e Estado da Aplicação', () => {
@@ -190,6 +216,7 @@ export function runHealthCheck(options = {}) {
         'qdlg',
         'gdlg',
         'cdlg',
+        'tdlg',
       ];
       for (const id of requiredIds) {
         assert($(id) !== null, `Elemento obrigatório #${id} ausente no DOM`);
@@ -202,6 +229,7 @@ export function runHealthCheck(options = {}) {
       assert(Array.isArray(state.habits), 'state.habits deve ser um Array');
       assert(Array.isArray(state.bank), 'state.bank deve ser um Array');
       assert(state.focus && typeof state.focus === 'object', 'state.focus deve existir');
+      assert(Array.isArray(state.focus.timers), 'state.focus.timers deve ser um Array');
     });
   }
 

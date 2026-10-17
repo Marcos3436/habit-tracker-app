@@ -216,6 +216,45 @@
     </div>
   </dialog>
 
+  <!-- Modal: Criar / Editar Temporizador -->
+  <dialog id="tdlg">
+    <strong id="ttitle" class="dialog-title">Novo temporizador</strong>
+    <label class="lab" for="tname">Nome do temporizador</label>
+    <input id="tname" maxlength="40" placeholder="Ex: CALC II, Econometria, 15 MINUTOS" autocomplete="off">
+    <label class="lab">Duração (Horas : Minutos : Segundos)</label>
+    <div class="timer-hms-inputs">
+      <div class="timer-hms-field">
+        <input id="thours" type="number" min="0" max="99" step="1" value="0" aria-label="Horas">
+        <span>horas</span>
+      </div>
+      <b class="timer-hms-sep">:</b>
+      <div class="timer-hms-field">
+        <input id="tmins" type="number" min="0" max="59" step="1" value="30" aria-label="Minutos">
+        <span>min</span>
+      </div>
+      <b class="timer-hms-sep">:</b>
+      <div class="timer-hms-field">
+        <input id="tsecs" type="number" min="0" max="59" step="1" value="0" aria-label="Segundos">
+        <span>seg</span>
+      </div>
+    </div>
+    <div class="timer-presets" id="tpresets">
+      <button type="button" class="timer-preset-btn" data-sec="300">5 min</button>
+      <button type="button" class="timer-preset-btn" data-sec="900">15 min</button>
+      <button type="button" class="timer-preset-btn" data-sec="1500">25 min</button>
+      <button type="button" class="timer-preset-btn" data-sec="1800">30 min</button>
+      <button type="button" class="timer-preset-btn" data-sec="2700">45 min</button>
+      <button type="button" class="timer-preset-btn" data-sec="3600">1 hora</button>
+      <button type="button" class="timer-preset-btn" data-sec="7200">2 horas</button>
+    </div>
+    <p id="terr" class="err"></p>
+    <div class="acts">
+      <button type="button" class="del" id="tdel" style="display:none">Excluir</button>
+      <button type="button" id="tcancel">Cancelar</button>
+      <button type="button" class="ok" id="tok">Salvar</button>
+    </div>
+  </dialog>
+
   <!-- Modal Global de Confirmação -->
   <dialog id="qdlg">
     <p id="qmsg"></p>

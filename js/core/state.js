@@ -106,6 +106,12 @@ if (loadedRw.habitRule !== 2) {
   } catch (_) {}
 }
 
+export const DEFAULT_TIMERS = [
+  { id: 't-30m', name: '30 minutos', durationSec: 1800 },
+  { id: 't-15m', name: '15 minutos', durationSec: 900 },
+  { id: 't-60m', name: '1 hora', durationSec: 3600 },
+];
+
 let loadedFocus = {
   sessionMin: 180,
   skipBreaks: false,
@@ -115,6 +121,8 @@ let loadedFocus = {
   soundType: 'chime',
   dailyGoalMin: 240,
   history: {},
+  timers: DEFAULT_TIMERS.map((t) => ({ ...t })),
+  subtab: 'focus',
   at: 0,
 };
 try {
@@ -125,6 +133,18 @@ try {
       loadedFocus.soundType = f.sound === false ? 'off' : 'chime';
     }
     loadedFocus.history = loadedFocus.history && typeof loadedFocus.history === 'object' ? loadedFocus.history : {};
+    if (!Array.isArray(loadedFocus.timers)) {
+      loadedFocus.timers = DEFAULT_TIMERS.map((t) => ({ ...t }));
+    } else {
+      loadedFocus.timers = loadedFocus.timers
+        .filter((t) => t && typeof t === 'object')
+        .map((t, idx) => ({
+          id: String(t.id || `t-${idx}-${uid()}`),
+          name: String(t.name || `Temporizador ${idx + 1}`).slice(0, 40),
+          durationSec: Math.max(1, Math.min(359999, Math.round(+t.durationSec || 60))),
+        }));
+    }
+    if (loadedFocus.subtab !== 'timer') loadedFocus.subtab = 'focus';
   }
 } catch (_) {}
 
