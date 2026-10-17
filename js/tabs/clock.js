@@ -1,7 +1,7 @@
 /**
  * @fileoverview Módulo da Aba 4: Relógio de Foco (Sessões de Concentração & Andamento Diário).
- * Arquitetura baseada em funções puras (determinísticas e testáveis) e motor de tempo
- * baseado em timestamps reais (Date.now) para evitar atrasos (drift) em segundo plano.
+ * Arquitetura baseada em funções puras (determinísticas e testáveis), múltiplos timbres de alarme,
+ * notificações nativas do Windows e motor de tempo baseado em timestamps reais (Date.now).
  */
 
 import { keyOf, todayN } from '../core/dates.js';
@@ -12,6 +12,18 @@ import { pushFocus, quiet } from '../core/supabase.js';
 export const MIN_SESSION_MIN = 15;
 export const MAX_SESSION_MIN = 240;
 export const SESSION_STEP_MIN = 15;
+
+/**
+ * Catálogo de opções de som de alarme sintetizados via Web Audio API.
+ */
+export const ALARM_SOUNDS = [
+  { id: 'chime', label: 'Sino Suave (Chime)' },
+  { id: 'bell', label: 'Campainha Cristalina' },
+  { id: 'digital', label: 'Alarme Digital (Beep)' },
+  { id: 'marimba', label: 'Marimba Zen' },
+  { id: 'harp', label: 'Harpa Celestial' },
+  { id: 'off', label: 'Silencioso (Sem som)' },
+];
 
 /* ==========================================================================
    1. FUNÇÕES PURAS DE REGRA DE NEGÓCIO (Fáceis de Testar e Depurar)
@@ -82,11 +94,11 @@ export function buildSessionPlan(
 }
 
 /**
- * Calcula os indicadores do painel "Andamento diário" (Ontem, Hoje, Meta, % e Sequência).
+ * Calcula os indicadores do painel "Andamento diário" (Ontem, Hoje, Meta, %, Sequência e Conclusão).
  * @param {Record<string, number>} history Mapa 'YYYY-MM-DD' -> minutos concluídos
  * @param {number} dailyGoalMin Meta diária em minutos
  * @param {number} [todayInt=todayN()] Índice inteiro do dia de hoje
- * @returns {{todayMin: number, yesterdayMin: number, goalMin: number, progressPct: number, streak: number}}
+ * @returns {{todayMin: number, yesterdayMin: number, goalMin: number, progressPct: number, streak: number, goalReached: boolean}}
  */
 export function calcDailyFocusStats(history = {}, dailyGoalMin = 240, todayInt = todayN()) {
   const safeHist = history && typeof history === 'object' ? history : {};
@@ -97,6 +109,7 @@ export function calcDailyFocusStats(history = {}, dailyGoalMin = 240, todayInt =
   const todayMin = Math.max(0, Math.round(+(safeHist[todayKey] || 0)));
   const yesterdayMin = Math.max(0, Math.round(+(safeHist[yesterdayKey] || 0)));
   const progressPct = Math.min(100, Math.round((todayMin / goalMin) * 100));
+  const goalReached = todayMin >= goalMin;
 
   // Sequência de metas diárias batidas (hoje ainda pode estar em andamento)
   let n = todayInt;
@@ -109,7 +122,7 @@ export function calcDailyFocusStats(history = {}, dailyGoalMin = 240, todayInt =
     n--;
   }
 
-  return { todayMin, yesterdayMin, goalMin, progressPct, streak };
+  return { todayMin, yesterdayMin, goalMin, progressPct, streak, goalReached };
 }
 
 /**
@@ -146,35 +159,92 @@ export function formatCountdown(totalSeconds) {
 }
 
 /* ==========================================================================
-   2. MOTOR DE EXECUÇÃO DA SESSÃO (State Machine sem Drift)
+   2. SINTETIZADOR DE SONS DE ALARME E NOTIFICAÇÕES DO WINDOWS
    ========================================================================== */
 
-let activeSession = null;
-let tickInterval = null;
-
 /**
- * Emite um alerta sonoro suave usando Web Audio API (sem arquivos externos).
+ * Toca o som de alarme selecionado usando Web Audio API.
+ * @param {string} [soundType] ID do som ('chime'|'bell'|'digital'|'marimba'|'harp'|'off')
  */
-function playChime() {
-  if (!state.focus.sound) return;
+export function playAlarmSound(soundType) {
+  const type = soundType ?? state.focus.soundType ?? 'chime';
+  if (type === 'off' || state.focus.sound === false) return;
+
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
     const ctx = new Ctx();
-    [523.25, 659.25, 783.99].forEach((freq, idx) => {
+    const now = ctx.currentTime;
+
+    const tone = (freq, start, dur, wave = 'sine', vol = 0.16) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.12, ctx.currentTime + idx * 0.14);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.14 + 0.45);
+      osc.type = wave;
+      osc.frequency.setValueAtTime(freq, now + start);
+      gain.gain.setValueAtTime(vol, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.0008, now + start + dur);
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + idx * 0.14);
-      osc.stop(ctx.currentTime + idx * 0.14 + 0.46);
-    });
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.02);
+    };
+
+    if (type === 'bell') {
+      // Campainha Cristalina (harmônicos agudos)
+      [880, 1318.5, 1760].forEach((f, i) => {
+        tone(f, i * 0.18, 0.75, 'sine', 0.15);
+        tone(f * 2, i * 0.18, 0.35, 'triangle', 0.06);
+      });
+    } else if (type === 'digital') {
+      // Alarme Digital Clássico (bipes duplos)
+      [0, 0.12, 0.24, 0.55, 0.67, 0.79].forEach((t) => {
+        tone(1046.5, t, 0.08, 'square', 0.09);
+      });
+    } else if (type === 'marimba') {
+      // Marimba Zen
+      [392.0, 493.88, 587.33, 783.99].forEach((f, i) => {
+        tone(f, i * 0.11, 0.32, 'triangle', 0.2);
+      });
+    } else if (type === 'harp') {
+      // Harpa Celestial (arpejo ascendente suave)
+      [523.25, 587.33, 659.25, 783.99, 1046.5].forEach((f, i) => {
+        tone(f, i * 0.09, 0.65, 'sine', 0.13);
+      });
+    } else {
+      // 'chime' (Padrão: Sino Suave)
+      [523.25, 659.25, 783.99].forEach((f, i) => {
+        tone(f, i * 0.15, 0.5, 'sine', 0.15);
+      });
+    }
   } catch (_) {}
 }
+
+/**
+ * Solicita permissão e envia uma notificação nativa do Windows / Sistema Operacional.
+ * @param {string} title Título da notificação
+ * @param {string} body Corpo da mensagem
+ */
+export function sendWindowsNotification(title, body) {
+  try {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body, silent: false });
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then((perm) => {
+        if (perm === 'granted') {
+          new Notification(title, { body, silent: false });
+        }
+      });
+    }
+  } catch (_) {}
+}
+
+/* ==========================================================================
+   3. MOTOR DE EXECUÇÃO DA SESSÃO (State Machine sem Drift)
+   ========================================================================== */
+
+let activeSession = null;
+let tickInterval = null;
 
 function persistAndSyncFocus() {
   state.focus.at = Date.now();
@@ -183,15 +253,25 @@ function persistAndSyncFocus() {
 }
 
 /**
- * Credita minutos de foco concluídos no dia de hoje.
+ * Credita minutos de foco concluídos no dia de hoje e verifica se bateu a meta diária.
  * @param {number} mins
  */
 export function recordFocusMinutes(mins) {
   if (!(mins > 0)) return;
   const k = keyOf(todayN());
   state.focus.history = state.focus.history || {};
-  state.focus.history[k] = Math.max(0, Math.round((state.focus.history[k] || 0) + mins));
+  const before = state.focus.history[k] || 0;
+  const after = Math.max(0, Math.round(before + mins));
+  state.focus.history[k] = after;
   persistAndSyncFocus();
+
+  const goal = state.focus.dailyGoalMin || 240;
+  if (before < goal && after >= goal) {
+    sendWindowsNotification(
+      '🎉 Parabéns! Meta diária atingida!',
+      `Você concluiu ${after} minutos de foco hoje e bateu sua meta diária no Rabitu!`
+    );
+  }
 }
 
 function getPhaseElapsedSec() {
@@ -223,13 +303,32 @@ function creditElapsedFocusMinutes(flushRemainder = false) {
 
 function advanceSessionStep() {
   if (!activeSession) return;
+  const finishedStep = activeSession.plan.steps[activeSession.stepIdx];
   creditElapsedFocusMinutes(true);
-  playChime();
+  playAlarmSound();
 
   activeSession.stepIdx++;
-  if (activeSession.stepIdx >= activeSession.plan.steps.length) {
+  const nextStep = activeSession.plan.steps[activeSession.stepIdx];
+
+  if (!nextStep) {
+    sendWindowsNotification(
+      '🏆 Sessão de concentração concluída!',
+      'Excelente trabalho! Você finalizou todas as etapas da sua sessão de foco.'
+    );
     stopFocusSession(false);
     return;
+  }
+
+  if (finishedStep && finishedStep.type === 'focus' && nextStep.type === 'break') {
+    sendWindowsNotification(
+      '☕ Hora do intervalo!',
+      `Bloco de foco concluído. Aproveite ${nextStep.minutes} min de pausa para descansar.`
+    );
+  } else if (finishedStep && finishedStep.type === 'break' && nextStep.type === 'focus') {
+    sendWindowsNotification(
+      '🎯 Fim do intervalo!',
+      `Hora de retomar a concentração: ${nextStep.label} (${nextStep.minutes} min).`
+    );
   }
 
   activeSession.accumulatedSec = 0;
@@ -257,6 +356,12 @@ function onTimerTick() {
 }
 
 export function startFocusSession() {
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  } catch (_) {}
+
   const f = state.focus;
   const plan = buildSessionPlan(f.sessionMin, f.skipBreaks, f.blockMin, f.breakMin);
   activeSession = {
@@ -296,7 +401,7 @@ export function stopFocusSession(flushPartial = true) {
 }
 
 /* ==========================================================================
-   3. RENDERIZAÇÃO VISUAL E ATUALIZAÇÃO DE DOM
+   4. RENDERIZAÇÃO VISUAL E ATUALIZAÇÃO DE DOM
    ========================================================================== */
 
 const TIMER_RADIUS = 96;
@@ -326,6 +431,7 @@ function updateDailyProgressDOM() {
   const sVal = $('clk-streak-val');
   const sUnit = $('clk-streak-unit');
   const comp = $('clk-completed-txt');
+  const congrats = $('clk-congrats-box');
 
   if (yVal) yVal.textContent = String(st.yesterdayMin);
   if (yUnit) yUnit.textContent = st.yesterdayMin === 1 ? 'minuto' : 'minutos';
@@ -340,10 +446,21 @@ function updateDailyProgressDOM() {
   if (comp) {
     comp.textContent = `Concluído: ${st.todayMin} ${st.todayMin === 1 ? 'minuto' : 'minutos'}`;
   }
+  if (congrats) {
+    congrats.style.display = st.goalReached ? '' : 'none';
+  }
+}
+
+function renderSoundOptions(selectedId) {
+  return ALARM_SOUNDS.map(
+    (s) =>
+      `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.label}</option>`
+  ).join('');
 }
 
 function renderLeftCardContent() {
   const f = state.focus;
+  const curSound = f.sound === false ? 'off' : f.soundType || 'chime';
 
   if (!activeSession) {
     const breaks = calcFocusIntervals(f.sessionMin, f.skipBreaks, f.blockMin);
@@ -356,7 +473,7 @@ function renderLeftCardContent() {
       <div class="clock-card-top">
         <span></span>
         <div class="clock-card-actions">
-          <button type="button" class="clock-icon-btn" id="clk-cfg-btn" title="Configurar blocos e intervalos">⋯</button>
+          <button type="button" class="clock-icon-btn" id="clk-cfg-btn" title="Configurar blocos, pausas e som">⋯</button>
         </div>
       </div>
       <div class="session-setup">
@@ -379,10 +496,18 @@ function renderLeftCardContent() {
 
         <p class="focus-breaks-info" id="clk-breaks-txt">${breaksText}</p>
 
-        <label class="focus-skip-label">
+        <label class="focus-skip-label" style="margin-bottom:14px">
           <input type="checkbox" id="clk-skip-chk" ${f.skipBreaks ? 'checked' : ''}>
           <span>Pular pausas</span>
         </label>
+
+        <div class="focus-sound-quick">
+          <span>🔔 Alarme:</span>
+          <select id="clk-quick-sound" aria-label="Som de alarme">
+            ${renderSoundOptions(curSound)}
+          </select>
+          <button type="button" id="clk-test-sound" title="Ouvir prévia do alarme">🔊</button>
+        </div>
 
         <div>
           <button type="button" class="focus-start-btn" id="clk-start-btn">
@@ -419,7 +544,7 @@ function renderLeftCardContent() {
     <div class="clock-card-top">
       <span class="clock-card-title">Sessão de concentração</span>
       <div class="clock-card-actions">
-        <button type="button" class="clock-icon-btn" id="clk-cfg-btn" title="Configurar blocos e intervalos">⋯</button>
+        <button type="button" class="clock-icon-btn" id="clk-cfg-btn" title="Configurar blocos, pausas e som">⋯</button>
       </div>
     </div>
     <div class="session-active">
@@ -528,6 +653,10 @@ export function drawClock() {
           <p class="daily-completed-text" id="clk-completed-txt">
             Concluído: ${st.todayMin} ${st.todayMin === 1 ? 'minuto' : 'minutos'}
           </p>
+
+          <div class="goal-congrats" id="clk-congrats-box" style="${st.goalReached ? '' : 'display:none'}">
+            🎉 Parabéns! Você bateu sua meta diária de foco hoje!
+          </div>
         </div>
       </div>
     </div>
@@ -583,14 +712,17 @@ function openClockConfigModal() {
   if (!dlg) return;
   $('cblock').value = String(state.focus.blockMin || 60);
   $('cbreak').value = String(state.focus.breakMin || 5);
-  $('csound').checked = state.focus.sound !== false;
+  const curSound = state.focus.sound === false ? 'off' : state.focus.soundType || 'chime';
+  $('csound').value = curSound;
   dlg.showModal();
 }
 
 function saveClockConfigModal() {
   state.focus.blockMin = Math.max(15, Math.min(120, +$('cblock').value || 60));
   state.focus.breakMin = Math.max(1, Math.min(60, +$('cbreak').value || 5));
-  state.focus.sound = !!$('csound').checked;
+  const chosenSound = $('csound').value || 'chime';
+  state.focus.soundType = chosenSound;
+  state.focus.sound = chosenSound !== 'off';
   persistAndSyncFocus();
   $('cdlg').close();
   drawClock();
@@ -600,6 +732,8 @@ function bindClockViewEvents() {
   const incBtn = $('clk-inc');
   const decBtn = $('clk-dec');
   const skipChk = $('clk-skip-chk');
+  const quickSound = $('clk-quick-sound');
+  const testSoundBtn = $('clk-test-sound');
   const startBtn = $('clk-start-btn');
   const pauseBtn = $('clk-pause-btn');
   const skipStepBtn = $('clk-skip-step-btn');
@@ -614,6 +748,20 @@ function bindClockViewEvents() {
       state.focus.skipBreaks = skipChk.checked;
       persistAndSyncFocus();
       drawClock();
+    };
+  }
+  if (quickSound) {
+    quickSound.onchange = () => {
+      state.focus.soundType = quickSound.value;
+      state.focus.sound = quickSound.value !== 'off';
+      persistAndSyncFocus();
+      playAlarmSound(quickSound.value);
+    };
+  }
+  if (testSoundBtn) {
+    testSoundBtn.onclick = () => {
+      const s = quickSound ? quickSound.value : state.focus.soundType;
+      playAlarmSound(s);
     };
   }
   if (startBtn) startBtn.onclick = startFocusSession;
@@ -644,6 +792,10 @@ export function initClockTab() {
   if (cdlg) {
     $('cok').onclick = saveClockConfigModal;
     $('ccancel').onclick = () => cdlg.close();
+    const previewBtn = $('csound-test');
+    if (previewBtn) {
+      previewBtn.onclick = () => playAlarmSound($('csound').value);
+    }
     cdlg.addEventListener('click', (e) => {
       if (e.target === cdlg) cdlg.close();
     });

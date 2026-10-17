@@ -112,6 +112,7 @@ let loadedFocus = {
   blockMin: 60,
   breakMin: 5,
   sound: true,
+  soundType: 'chime',
   dailyGoalMin: 240,
   history: {},
   at: 0,
@@ -120,6 +121,9 @@ try {
   const f = JSON.parse(localStorage.getItem(FK));
   if (f && typeof f === 'object') {
     Object.assign(loadedFocus, f);
+    if (!f.soundType) {
+      loadedFocus.soundType = f.sound === false ? 'off' : 'chime';
+    }
     loadedFocus.history = loadedFocus.history && typeof loadedFocus.history === 'object' ? loadedFocus.history : {};
   }
 } catch (_) {}

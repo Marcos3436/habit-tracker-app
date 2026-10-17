@@ -140,7 +140,7 @@ export function renderHabits() {
           </div>
           ${cells}
           <div class="st">
-            <button type="button" class="fire ${s.cur ? 'on' : ''}" data-streak="${h.id}" title="Ver detalhes da ofensiva" data-tip-delay="2500">
+            <button type="button" class="fire ${s.cur ? 'on' : ''}" data-streak="${h.id}" title="Ver detalhes da ofensiva">
               🔥<b>${s.cur}</b>
             </button>
           </div>

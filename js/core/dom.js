@@ -80,6 +80,9 @@ export function initTheme() {
   setTheme(saved || (prefersDark ? 'dark' : 'light'));
 }
 
+/** Tempo padrão (em ms) com o cursor sobre o elemento antes de exibir a descrição: 1,75s */
+export const DEFAULT_TIP_DELAY = 1750;
+
 /**
  * Inicializa o sistema de Tooltips customizados baseado na Popover API.
  */
@@ -124,14 +127,10 @@ export function initTooltips() {
       if (el !== tipEl) {
         hideTip();
         tipEl = el;
-        const delay = +el.dataset.tipDelay || 0;
-        if (delay) {
-          tipTimer = setTimeout(() => {
-            if (tipEl === el) showTip(el);
-          }, delay);
-        } else {
-          showTip(el);
-        }
+        const delay = +el.dataset.tipDelay || DEFAULT_TIP_DELAY;
+        tipTimer = setTimeout(() => {
+          if (tipEl === el) showTip(el);
+        }, delay);
       }
     } else {
       hideTip();

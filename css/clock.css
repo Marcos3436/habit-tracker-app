@@ -44,7 +44,7 @@
 }
 
 .clock-card-title {
-  font: 700 16px/1.2 var(--font-display);
+  font: 700 22px/1.25 var(--font-display);
   color: var(--text);
 }
 
@@ -447,6 +447,82 @@
   font-size: 14px;
   color: var(--text);
   margin: 4px 0 0;
+}
+
+.goal-congrats {
+  margin: 12px auto 0;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: rgba(47, 200, 107, 0.14);
+  border: 1px solid rgba(47, 200, 107, 0.35);
+  color: var(--green);
+  font: 600 13.5px/1.35 var(--font-display);
+  text-align: center;
+  animation: congratsIn 0.35s ease-out;
+}
+
+@keyframes congratsIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+.sound-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.sound-picker-row select {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.sound-test-btn {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sound-test-btn:hover {
+  filter: brightness(0.94);
+}
+
+.focus-sound-quick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  color: var(--mute);
+}
+
+.focus-sound-quick select {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.focus-sound-quick button {
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-size: 13px;
 }
 
 /* --- Responsividade --- */

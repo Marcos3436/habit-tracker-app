@@ -1,13 +1,15 @@
 /**
  * @fileoverview Suíte Pré-definida de Testes de Qualidade e Saúde do Programa (Self-Diagnostic Suite).
  * Executa automaticamente na inicialização do aplicativo (e via terminal) para validar
- * datas, segurança XSS, cálculo de ofensivas, regras de créditos, sessões de foco e integridade do DOM.
+ * datas, segurança XSS, cálculo de ofensivas, regras de créditos, sessões de foco, sons,
+ * tempo de tooltip (1,75s) e integridade do DOM.
  */
 
 import { dim, dow, fmtD, keyOf, nWeeks, parseKey } from './dates.js';
-import { $, esc } from './dom.js';
+import { $, DEFAULT_TIP_DELAY, esc } from './dom.js';
 import { HABCREDIT, HABMIN, MINS, PER, state, stats } from './state.js';
 import {
+  ALARM_SOUNDS,
   buildSessionPlan,
   calcDailyFocusStats,
   calcFocusIntervals,
@@ -55,12 +57,16 @@ export function runHealthCheck(options = {}) {
     assert(nWeeks(2026, 9) >= 4 && nWeeks(2026, 9) <= 6, 'nWeeks válido');
   });
 
-  // 2. Segurança XSS
-  test('Segurança: escape de caracteres HTML (XSS)', () => {
+  // 2. Segurança XSS e Tempo de Tooltip (1,75s = 1750ms)
+  test('UI Global: escape XSS e tempo de tooltip de 1,75s (1750ms)', () => {
     const dirty = `<script>alert("x"&'y')</script>`;
     const clean = esc(dirty);
     assert(!clean.includes('<') && !clean.includes('>'), 'Tags HTML devem ser escapadas');
     assert(clean.includes('&lt;script&gt;'), 'Deve conter entidades escapadas');
+    assert(
+      DEFAULT_TIP_DELAY === 1750,
+      `Delay padrão de tooltip deve ser 1750ms (1,75s), obtido ${DEFAULT_TIP_DELAY}`
+    );
   });
 
   // 3. Regras do Tanque de Lazer (0,5 crédito por hábito = 10 min)
@@ -82,8 +88,8 @@ export function runHealthCheck(options = {}) {
     assert(st.total === 4, `Total esperado 4, obtido ${st.total}`);
   });
 
-  // 5. Relógio de Foco: Cálculo de Intervalos e Plano de Sessão
-  test('Relógio de Foco: cálculo de intervalos e plano de 180 min', () => {
+  // 5. Relógio de Foco: Cálculo de Intervalos, Plano de Sessão e Sons de Alarme
+  test('Relógio de Foco: intervalos, plano de 180 min e catálogo de sons', () => {
     assert(
       calcFocusIntervals(180, false, 60) === 2,
       '180 min com blocos de 60 min deve ter 2 intervalos'
@@ -105,10 +111,14 @@ export function runHealthCheck(options = {}) {
       .reduce((acc, s) => acc + s.minutes, 0);
     assert(sumFocus === 180, `Soma dos blocos de foco deve ser 180, obtido ${sumFocus}`);
     assert(plan.steps[1].type === 'break' && plan.steps[1].minutes === 5, 'Pausa deve ter 5 min');
+    assert(
+      Array.isArray(ALARM_SOUNDS) && ALARM_SOUNDS.length >= 6,
+      'Catálogo de sons deve ter ao menos 6 opções'
+    );
   });
 
-  // 6. Relógio de Foco: Andamento Diário, Sequência e Formatação
-  test('Relógio de Foco: andamento diário, meta e sequência de dias', () => {
+  // 6. Relógio de Foco: Andamento Diário, Parabéns da Meta e Sequência
+  test('Relógio de Foco: andamento diário, meta batida (goalReached) e sequência', () => {
     const fakeToday = 20742;
     const hist = {
       [keyOf(fakeToday - 3)]: 240,
@@ -120,7 +130,11 @@ export function runHealthCheck(options = {}) {
     assert(st.todayMin === 53, `Hoje esperado 53 min, obtido ${st.todayMin}`);
     assert(st.yesterdayMin === 240, `Ontem esperado 240 min, obtido ${st.yesterdayMin}`);
     assert(st.streak === 3, `Sequência esperada 3 dias (ontem + 2 anteriores), obtido ${st.streak}`);
-    assert(st.progressPct === Math.round((53 / 240) * 100), 'Percentual da meta incorreto');
+    assert(st.goalReached === false, 'Com 53/240 min goalReached deve ser false');
+
+    const stDone = calcDailyFocusStats({ ...hist, [keyOf(fakeToday)]: 240 }, 240, fakeToday);
+    assert(stDone.goalReached === true, 'Com 240/240 min goalReached deve ser true');
+    assert(stDone.streak === 4, 'Ao bater a meta hoje, a sequência sobe para 4 dias');
 
     const disp = formatGoalDisplay(240);
     assert(disp.value === '4' && disp.unit === 'horas', '240 min deve exibir 4 horas');
@@ -130,7 +144,7 @@ export function runHealthCheck(options = {}) {
 
   // 7. Integridade do Estado e DOM (quando no navegador)
   if (checkDOM) {
-    test('Integridade do DOM e Estado da Aplicação', () => {
+    test('Integridade do DOM, Identidade "Rabitu" e Estado da Aplicação', () => {
       const requiredIds = [
         'app',
         'tH',
@@ -154,6 +168,11 @@ export function runHealthCheck(options = {}) {
       for (const id of requiredIds) {
         assert($(id) !== null, `Elemento obrigatório #${id} ausente no DOM`);
       }
+      const logoSpan = document.querySelector('.logo span');
+      assert(
+        logoSpan && logoSpan.textContent.trim() === 'Rabitu',
+        'Logo deve exibir o nome "Rabitu"'
+      );
       assert(Array.isArray(state.habits), 'state.habits deve ser um Array');
       assert(Array.isArray(state.bank), 'state.bank deve ser um Array');
       assert(state.focus && typeof state.focus === 'object', 'state.focus deve existir');
