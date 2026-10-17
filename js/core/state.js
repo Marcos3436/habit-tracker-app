@@ -10,6 +10,7 @@ const KEY = 'habit-tracker.v1';
 const MOCK_KEY = 'habit-tracker.is-mock';
 const BK = 'habit-tracker.bank.v1';
 const RK = 'habit-tracker.reward.v1';
+const FK = 'habit-tracker.focus.v1';
 
 /* Constantes de Recompensa (Tanque de Lazer):
  * 0,5h de estudo = 1 crédito = 20 min de lazer
@@ -105,6 +106,24 @@ if (loadedRw.habitRule !== 2) {
   } catch (_) {}
 }
 
+let loadedFocus = {
+  sessionMin: 180,
+  skipBreaks: false,
+  blockMin: 60,
+  breakMin: 5,
+  sound: true,
+  dailyGoalMin: 240,
+  history: {},
+  at: 0,
+};
+try {
+  const f = JSON.parse(localStorage.getItem(FK));
+  if (f && typeof f === 'object') {
+    Object.assign(loadedFocus, f);
+    loadedFocus.history = loadedFocus.history && typeof loadedFocus.history === 'object' ? loadedFocus.history : {};
+  }
+} catch (_) {}
+
 const now = new Date();
 
 /**
@@ -115,6 +134,7 @@ export const state = {
   isMock,
   bank: loadedBank,
   rw: loadedRw,
+  focus: loadedFocus,
   activeTab: 'habits',
   view: {
     y: now.getFullYear(),
@@ -165,6 +185,15 @@ export function persistRw() {
     localStorage.setItem(RK, JSON.stringify(state.rw));
   } catch (_) {}
   notifyUI();
+}
+
+/**
+ * Salva as configurações e histórico do Relógio de Foco no LocalStorage.
+ */
+export function saveFocus() {
+  try {
+    localStorage.setItem(FK, JSON.stringify(state.focus));
+  } catch (_) {}
 }
 
 /**

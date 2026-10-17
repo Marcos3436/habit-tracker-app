@@ -1,5 +1,5 @@
-﻿{
-  "version": 10,
+{
+  "version": 11,
   "files": [
     "index.html",
     "manifest.json",
@@ -9,16 +9,18 @@
     "css/habits.css",
     "css/dashboard.css",
     "css/bank.css",
+    "css/clock.css",
     "js/main.js",
     "js/file-fallback.js",
     "js/core/dates.js",
     "js/core/dom.js",
     "js/core/state.js",
     "js/core/supabase.js",
+    "js/core/health.js",
     "js/tabs/habits.js",
     "js/tabs/dashboard.js",
     "js/tabs/bank.js",
+    "js/tabs/clock.js",
     "js/tabs/reports.js"
   ]
 }
-

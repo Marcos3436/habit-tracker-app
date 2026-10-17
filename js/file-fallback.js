@@ -249,6 +249,7 @@ const KEY = 'habit-tracker.v1';
 const MOCK_KEY = 'habit-tracker.is-mock';
 const BK = 'habit-tracker.bank.v1';
 const RK = 'habit-tracker.reward.v1';
+const FK = 'habit-tracker.focus.v1';
 
 /* Constantes de Recompensa (Tanque de Lazer):
  * 0,5h de estudo = 1 crédito = 20 min de lazer
@@ -344,6 +345,24 @@ if (loadedRw.habitRule !== 2) {
   } catch (_) {}
 }
 
+let loadedFocus = {
+  sessionMin: 180,
+  skipBreaks: false,
+  blockMin: 60,
+  breakMin: 5,
+  sound: true,
+  dailyGoalMin: 240,
+  history: {},
+  at: 0,
+};
+try {
+  const f = JSON.parse(localStorage.getItem(FK));
+  if (f && typeof f === 'object') {
+    Object.assign(loadedFocus, f);
+    loadedFocus.history = loadedFocus.history && typeof loadedFocus.history === 'object' ? loadedFocus.history : {};
+  }
+} catch (_) {}
+
 const now = new Date();
 
 /**
@@ -354,6 +373,7 @@ const state = {
   isMock,
   bank: loadedBank,
   rw: loadedRw,
+  focus: loadedFocus,
   activeTab: 'habits',
   view: {
     y: now.getFullYear(),
@@ -404,6 +424,15 @@ function persistRw() {
     localStorage.setItem(RK, JSON.stringify(state.rw));
   } catch (_) {}
   notifyUI();
+}
+
+/**
+ * Salva as configurações e histórico do Relógio de Foco no LocalStorage.
+ */
+function saveFocus() {
+  try {
+    localStorage.setItem(FK, JSON.stringify(state.focus));
+  } catch (_) {}
 }
 
 /**
@@ -758,6 +787,56 @@ async function syncReward() {
   }
 }
 
+/* ---------- Sincronização do Relógio de Foco ---------- */
+
+async function pushFocus() {
+  try {
+    await sb('focus_state', {
+      method: 'POST',
+      headers: UP,
+      body: JSON.stringify([
+        {
+          id: 'main',
+          daily_goal_min: state.focus.dailyGoalMin,
+          session_min: state.focus.sessionMin,
+          skip_breaks: state.focus.skipBreaks,
+          block_min: state.focus.blockMin,
+          break_min: state.focus.breakMin,
+          history: state.focus.history || {},
+          updated_at: new Date(state.focus.at || Date.now()).toISOString(),
+        },
+      ]),
+    });
+  } catch (_) {
+    // Ignora silenciosamente caso a tabela opcional focus_state ainda não tenha sido criada no Supabase
+  }
+}
+
+async function syncFocus() {
+  if (!isCloudOn()) return;
+  try {
+    const rows = await sb('focus_state?id=eq.main&select=*');
+    const r = rows && rows[0];
+    const ra = r ? Date.parse(r.updated_at) : 0;
+    if (r && ra > (state.focus.at || 0)) {
+      state.focus.dailyGoalMin = +r.daily_goal_min || 240;
+      state.focus.sessionMin = +r.session_min || 180;
+      state.focus.skipBreaks = !!r.skip_breaks;
+      state.focus.blockMin = +r.block_min || 60;
+      state.focus.breakMin = +r.break_min || 5;
+      const mergedHist = { ...(r.history || {}) };
+      for (const [day, min] of Object.entries(state.focus.history || {})) {
+        mergedHist[day] = Math.max(mergedHist[day] || 0, min || 0);
+      }
+      state.focus.history = mergedHist;
+      state.focus.at = ra;
+      saveFocus();
+    } else {
+      await pushFocus();
+    }
+  } catch (_) {}
+}
+
 /* ---------- Sincronização Geral (Inicialização e Manual) ---------- */
 
 async function sync() {
@@ -809,6 +888,7 @@ async function sync() {
     try {
       await syncBank();
       await syncReward();
+      await syncFocus();
     } catch (e) {
       bankErr = e.message;
     }
@@ -1820,16 +1900,835 @@ function initHabitsTab() {
 }
 
 
+/* === js/tabs/clock.js === */
+/**
+ * @fileoverview Módulo da Aba 4: Relógio de Foco (Sessões de Concentração & Andamento Diário).
+ * Arquitetura baseada em funções puras (determinísticas e testáveis) e motor de tempo
+ * baseado em timestamps reais (Date.now) para evitar atrasos (drift) em segundo plano.
+ */
+
+const MIN_SESSION_MIN = 15;
+const MAX_SESSION_MIN = 240;
+const SESSION_STEP_MIN = 15;
+
+/* ==========================================================================
+   1. FUNÇÕES PURAS DE REGRA DE NEGÓCIO (Fáceis de Testar e Depurar)
+   ========================================================================== */
+
+/**
+ * Calcula a quantidade de intervalos (pausas) para uma sessão de foco.
+ * @param {number} totalMinutes Duração total de foco escolhida (em minutos)
+ * @param {boolean} [skipBreaks=false] Se o usuário marcou "Pular pausas"
+ * @param {number} [blockMinutes=60] Tamanho máximo de cada bloco de foco antes de pausa
+ * @returns {number} Quantidade de intervalos
+ */
+function calcFocusIntervals(totalMinutes, skipBreaks = false, blockMinutes = 60) {
+  const total = Math.max(5, Math.min(480, Math.round(+totalMinutes || 30)));
+  const block = Math.max(10, Math.round(+blockMinutes || 60));
+  if (skipBreaks || total <= block) return 0;
+  return Math.max(0, Math.ceil(total / block) - 1);
+}
+
+/**
+ * Constrói o plano detalhado de etapas (blocos de foco intercalados com pausas).
+ * @param {number} totalMinutes
+ * @param {boolean} [skipBreaks=false]
+ * @param {number} [blockMinutes=60]
+ * @param {number} [breakMinutes=5]
+ * @returns {{totalMinutes: number, breakCount: number, steps: Array<{type: 'focus'|'break', minutes: number, focusIndex?: number, totalFocusBlocks: number, breakIndex?: number, label: string}>}}
+ */
+function buildSessionPlan(
+  totalMinutes,
+  skipBreaks = false,
+  blockMinutes = 60,
+  breakMinutes = 5
+) {
+  const total = Math.max(5, Math.min(480, Math.round(+totalMinutes || 30)));
+  const brkMin = Math.max(1, Math.min(60, Math.round(+breakMinutes || 5)));
+  const breakCount = calcFocusIntervals(total, skipBreaks, blockMinutes);
+  const totalFocusBlocks = breakCount + 1;
+
+  const baseFocus = Math.floor(total / totalFocusBlocks);
+  const remainder = total % totalFocusBlocks;
+
+  const steps = [];
+  for (let i = 0; i < totalFocusBlocks; i++) {
+    const focusMin = baseFocus + (i < remainder ? 1 : 0);
+    steps.push({
+      type: 'focus',
+      minutes: focusMin,
+      focusIndex: i + 1,
+      totalFocusBlocks,
+      label:
+        totalFocusBlocks > 1
+          ? `Foco (${i + 1} de ${totalFocusBlocks})`
+          : 'Sessão de concentração',
+    });
+
+    if (i < breakCount) {
+      steps.push({
+        type: 'break',
+        minutes: brkMin,
+        breakIndex: i + 1,
+        totalFocusBlocks,
+        label: `Intervalo (${i + 1} de ${breakCount})`,
+      });
+    }
+  }
+
+  return { totalMinutes: total, breakCount, steps };
+}
+
+/**
+ * Calcula os indicadores do painel "Andamento diário" (Ontem, Hoje, Meta, % e Sequência).
+ * @param {Record<string, number>} history Mapa 'YYYY-MM-DD' -> minutos concluídos
+ * @param {number} dailyGoalMin Meta diária em minutos
+ * @param {number} [todayInt=todayN()] Índice inteiro do dia de hoje
+ * @returns {{todayMin: number, yesterdayMin: number, goalMin: number, progressPct: number, streak: number}}
+ */
+function calcDailyFocusStats(history = {}, dailyGoalMin = 240, todayInt = todayN()) {
+  const safeHist = history && typeof history === 'object' ? history : {};
+  const goalMin = Math.max(15, Math.round(+dailyGoalMin || 240));
+  const todayKey = keyOf(todayInt);
+  const yesterdayKey = keyOf(todayInt - 1);
+
+  const todayMin = Math.max(0, Math.round(+(safeHist[todayKey] || 0)));
+  const yesterdayMin = Math.max(0, Math.round(+(safeHist[yesterdayKey] || 0)));
+  const progressPct = Math.min(100, Math.round((todayMin / goalMin) * 100));
+
+  // Sequência de metas diárias batidas (hoje ainda pode estar em andamento)
+  let n = todayInt;
+  let streak = 0;
+  if ((safeHist[keyOf(n)] || 0) < goalMin) {
+    n--;
+  }
+  while ((safeHist[keyOf(n)] || 0) >= goalMin) {
+    streak++;
+    n--;
+  }
+
+  return { todayMin, yesterdayMin, goalMin, progressPct, streak };
+}
+
+/**
+ * Formata a exibição da meta diária para o centro do anel circular.
+ * @param {number} goalMin
+ * @returns {{value: string, unit: string}}
+ */
+function formatGoalDisplay(goalMin) {
+  if (goalMin >= 60 && goalMin % 30 === 0) {
+    const h = goalMin / 60;
+    return {
+      value: h.toLocaleString('pt-BR', { maximumFractionDigits: 1 }),
+      unit: h === 1 ? 'hora' : 'horas',
+    };
+  }
+  return {
+    value: String(goalMin),
+    unit: goalMin === 1 ? 'minuto' : 'minutos',
+  };
+}
+
+/**
+ * Formata segundos em 'MM:SS' ou 'HH:MM:SS'.
+ * @param {number} totalSeconds
+ * @returns {string}
+ */
+function formatCountdown(totalSeconds) {
+  const s = Math.max(0, Math.ceil(totalSeconds));
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = s % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return hrs > 0 ? `${pad(hrs)}:${pad(mins)}:${pad(secs)}` : `${pad(mins)}:${pad(secs)}`;
+}
+
+/* ==========================================================================
+   2. MOTOR DE EXECUÇÃO DA SESSÃO (State Machine sem Drift)
+   ========================================================================== */
+
+let activeSession = null;
+let tickInterval = null;
+
+/**
+ * Emite um alerta sonoro suave usando Web Audio API (sem arquivos externos).
+ */
+function playChime() {
+  if (!state.focus.sound) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    [523.25, 659.25, 783.99].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.12, ctx.currentTime + idx * 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + idx * 0.14 + 0.45);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + idx * 0.14);
+      osc.stop(ctx.currentTime + idx * 0.14 + 0.46);
+    });
+  } catch (_) {}
+}
+
+function persistAndSyncFocus() {
+  state.focus.at = Date.now();
+  saveFocus();
+  quiet(pushFocus);
+}
+
+/**
+ * Credita minutos de foco concluídos no dia de hoje.
+ * @param {number} mins
+ */
+function recordFocusMinutes(mins) {
+  if (!(mins > 0)) return;
+  const k = keyOf(todayN());
+  state.focus.history = state.focus.history || {};
+  state.focus.history[k] = Math.max(0, Math.round((state.focus.history[k] || 0) + mins));
+  persistAndSyncFocus();
+}
+
+function getPhaseElapsedSec() {
+  if (!activeSession) return 0;
+  const runningDelta = activeSession.paused
+    ? 0
+    : (Date.now() - activeSession.lastResumeAt) / 1000;
+  return activeSession.accumulatedSec + runningDelta;
+}
+
+function creditElapsedFocusMinutes(flushRemainder = false) {
+  if (!activeSession) return;
+  const step = activeSession.plan.steps[activeSession.stepIdx];
+  if (!step || step.type !== 'focus') return;
+
+  const totalSec = step.minutes * 60;
+  const elapsedSec = Math.min(totalSec, getPhaseElapsedSec());
+  const wholeMinutesDone = flushRemainder
+    ? Math.round(elapsedSec / 60)
+    : Math.floor(elapsedSec / 60);
+
+  const deltaMin = wholeMinutesDone - activeSession.creditedMinInStep;
+  if (deltaMin > 0) {
+    activeSession.creditedMinInStep += deltaMin;
+    recordFocusMinutes(deltaMin);
+    updateDailyProgressDOM();
+  }
+}
+
+function advanceSessionStep() {
+  if (!activeSession) return;
+  creditElapsedFocusMinutes(true);
+  playChime();
+
+  activeSession.stepIdx++;
+  if (activeSession.stepIdx >= activeSession.plan.steps.length) {
+    stopFocusSession(false);
+    return;
+  }
+
+  activeSession.accumulatedSec = 0;
+  activeSession.creditedMinInStep = 0;
+  activeSession.lastResumeAt = Date.now();
+  activeSession.paused = false;
+  drawClock();
+}
+
+function onTimerTick() {
+  if (!activeSession || activeSession.paused) return;
+  const step = activeSession.plan.steps[activeSession.stepIdx];
+  if (!step) return;
+
+  const totalSec = step.minutes * 60;
+  const elapsedSec = getPhaseElapsedSec();
+  creditElapsedFocusMinutes(false);
+
+  if (elapsedSec >= totalSec) {
+    advanceSessionStep();
+    return;
+  }
+
+  updateActiveTimerDOM(totalSec - elapsedSec, totalSec);
+}
+
+function startFocusSession() {
+  const f = state.focus;
+  const plan = buildSessionPlan(f.sessionMin, f.skipBreaks, f.blockMin, f.breakMin);
+  activeSession = {
+    plan,
+    stepIdx: 0,
+    paused: false,
+    accumulatedSec: 0,
+    creditedMinInStep: 0,
+    lastResumeAt: Date.now(),
+  };
+  clearInterval(tickInterval);
+  tickInterval = setInterval(onTimerTick, 250);
+  drawClock();
+}
+
+function togglePauseSession() {
+  if (!activeSession) return;
+  if (activeSession.paused) {
+    activeSession.paused = false;
+    activeSession.lastResumeAt = Date.now();
+  } else {
+    activeSession.accumulatedSec = getPhaseElapsedSec();
+    activeSession.paused = true;
+    creditElapsedFocusMinutes(false);
+  }
+  drawClock();
+}
+
+function stopFocusSession(flushPartial = true) {
+  if (activeSession && flushPartial) {
+    creditElapsedFocusMinutes(false);
+  }
+  clearInterval(tickInterval);
+  tickInterval = null;
+  activeSession = null;
+  drawClock();
+}
+
+/* ==========================================================================
+   3. RENDERIZAÇÃO VISUAL E ATUALIZAÇÃO DE DOM
+   ========================================================================== */
+
+const TIMER_RADIUS = 96;
+const TIMER_CIRC = 2 * Math.PI * TIMER_RADIUS;
+const GOAL_RADIUS = 86;
+const GOAL_CIRC = 2 * Math.PI * GOAL_RADIUS;
+
+function updateActiveTimerDOM(remainingSec, totalSec) {
+  const digitsEl = $('clk-digits');
+  const arcEl = $('clk-timer-arc');
+  if (digitsEl) digitsEl.textContent = formatCountdown(remainingSec);
+  if (arcEl) {
+    const ratio = totalSec > 0 ? Math.max(0, Math.min(1, remainingSec / totalSec)) : 0;
+    arcEl.style.strokeDashoffset = String(TIMER_CIRC * (1 - ratio));
+  }
+}
+
+function updateDailyProgressDOM() {
+  const st = calcDailyFocusStats(state.focus.history, state.focus.dailyGoalMin);
+  const gDisp = formatGoalDisplay(st.goalMin);
+
+  const yVal = $('clk-yest-val');
+  const yUnit = $('clk-yest-unit');
+  const gVal = $('clk-goal-val');
+  const gUnit = $('clk-goal-unit');
+  const gArc = $('clk-goal-arc');
+  const sVal = $('clk-streak-val');
+  const sUnit = $('clk-streak-unit');
+  const comp = $('clk-completed-txt');
+
+  if (yVal) yVal.textContent = String(st.yesterdayMin);
+  if (yUnit) yUnit.textContent = st.yesterdayMin === 1 ? 'minuto' : 'minutos';
+  if (gVal) gVal.textContent = gDisp.value;
+  if (gUnit) gUnit.textContent = gDisp.unit;
+  if (gArc) {
+    const offset = GOAL_CIRC * (1 - st.progressPct / 100);
+    gArc.style.strokeDashoffset = String(offset);
+  }
+  if (sVal) sVal.textContent = String(st.streak);
+  if (sUnit) sUnit.textContent = st.streak === 1 ? 'dia' : 'dias';
+  if (comp) {
+    comp.textContent = `Concluído: ${st.todayMin} ${st.todayMin === 1 ? 'minuto' : 'minutos'}`;
+  }
+}
+
+function renderLeftCardContent() {
+  const f = state.focus;
+
+  if (!activeSession) {
+    const breaks = calcFocusIntervals(f.sessionMin, f.skipBreaks, f.blockMin);
+    const breaksText =
+      breaks === 0
+        ? 'Você não terá intervalos'
+        : `Você terá <b>${breaks}</b> ${breaks === 1 ? 'intervalo' : 'intervalos'}`;
+
+    return `
+      <div class="clock-card-top">
+        <span></span>
+        <div class="clock-card-actions">
+          <button type="button" class="clock-icon-btn" id="clk-cfg-btn" title="Configurar blocos e intervalos">⋯</button>
+        </div>
+      </div>
+      <div class="session-setup">
+        <h3>Prepare-se para se concentrar</h3>
+        <p class="session-desc">
+          Desativaremos notificações e alertas de aplicativos durante cada sessão.
+          Para sessões mais longas, adicionaremos um intervalo curto para que você possa descansar.
+        </p>
+
+        <div class="focus-stepper">
+          <div class="focus-stepper-val">
+            <strong id="clk-session-val">${f.sessionMin}</strong>
+            <span>min</span>
+          </div>
+          <div class="focus-stepper-btns">
+            <button type="button" class="focus-step-btn" id="clk-inc" aria-label="Aumentar tempo" ${f.sessionMin >= MAX_SESSION_MIN ? 'disabled' : ''}>⌃</button>
+            <button type="button" class="focus-step-btn" id="clk-dec" aria-label="Diminuir tempo" ${f.sessionMin <= MIN_SESSION_MIN ? 'disabled' : ''}>⌄</button>
+          </div>
+        </div>
+
+        <p class="focus-breaks-info" id="clk-breaks-txt">${breaksText}</p>
+
+        <label class="focus-skip-label">
+          <input type="checkbox" id="clk-skip-chk" ${f.skipBreaks ? 'checked' : ''}>
+          <span>Pular pausas</span>
+        </label>
+
+        <div>
+          <button type="button" class="focus-start-btn" id="clk-start-btn">
+            <span>▶</span>
+            <span>Iniciar a sessão de concentração</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  // Visão da sessão em andamento
+  const step = activeSession.plan.steps[activeSession.stepIdx];
+  const isBreak = step.type === 'break';
+  const totalSec = step.minutes * 60;
+  const remainingSec = Math.max(0, totalSec - getPhaseElapsedSec());
+  const ratio = totalSec > 0 ? Math.max(0, Math.min(1, remainingSec / totalSec)) : 0;
+  const dashOffset = TIMER_CIRC * (1 - ratio);
+
+  const stepDots = activeSession.plan.steps
+    .map((s, idx) => {
+      const stClass =
+        idx < activeSession.stepIdx
+          ? 'done'
+          : idx === activeSession.stepIdx
+            ? 'active'
+            : '';
+      const brkClass = s.type === 'break' ? 'is-break' : '';
+      return `<span class="step-pill ${brkClass} ${stClass}" title="${s.label}: ${s.minutes} min"></span>`;
+    })
+    .join('');
+
+  return `
+    <div class="clock-card-top">
+      <span class="clock-card-title">Sessão de concentração</span>
+      <div class="clock-card-actions">
+        <button type="button" class="clock-icon-btn" id="clk-cfg-btn" title="Configurar blocos e intervalos">⋯</button>
+      </div>
+    </div>
+    <div class="session-active">
+      <div class="phase-badge ${isBreak ? 'is-break' : ''}">
+        ${isBreak ? '☕ ' : '🎯 '}${step.label}
+      </div>
+
+      <div class="timer-ring-wrap">
+        <svg class="timer-ring-svg" viewBox="0 0 224 224">
+          <circle class="timer-ring-bg" cx="112" cy="112" r="${TIMER_RADIUS}"></circle>
+          <circle
+            class="timer-ring-fg ${isBreak ? 'is-break' : ''}"
+            id="clk-timer-arc"
+            cx="112"
+            cy="112"
+            r="${TIMER_RADIUS}"
+            stroke-dasharray="${TIMER_CIRC}"
+            stroke-dashoffset="${dashOffset}"
+          ></circle>
+        </svg>
+        <div class="timer-center">
+          <strong class="timer-digits" id="clk-digits">${formatCountdown(remainingSec)}</strong>
+          <span class="timer-sub">${activeSession.paused ? 'Pausado' : isBreak ? 'Hora de descansar' : 'Mantenha o foco'}</span>
+        </div>
+      </div>
+
+      <div class="session-steps-dots">${stepDots}</div>
+
+      <div class="timer-controls">
+        <button type="button" class="timer-btn primary" id="clk-pause-btn">
+          ${activeSession.paused ? '▶ Continuar' : '⏸ Pausar'}
+        </button>
+        <button type="button" class="timer-btn" id="clk-skip-step-btn" title="Avançar para a próxima etapa">
+          ⏭ Pular etapa
+        </button>
+        <button type="button" class="timer-btn danger" id="clk-stop-btn">
+          ⏹ Encerrar
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Renderiza a aba completa do Relógio de Foco (#clock).
+ */
+function drawClock() {
+  const clockEl = $('clock');
+  if (!clockEl) return;
+
+  const st = calcDailyFocusStats(state.focus.history, state.focus.dailyGoalMin);
+  const gDisp = formatGoalDisplay(st.goalMin);
+  const goalDashOffset = GOAL_CIRC * (1 - st.progressPct / 100);
+
+  clockEl.innerHTML = `
+    <div class="clock-wrap">
+      <div class="clock-grid">
+        <!-- Card Esquerdo: Sessão de Concentração -->
+        <div class="clock-card session-card">
+          ${renderLeftCardContent()}
+        </div>
+
+        <!-- Card Direito: Andamento Diário -->
+        <div class="clock-card progress-card">
+          <div class="clock-card-top">
+            <span class="clock-card-title">Andamento diário</span>
+            <div class="clock-card-actions">
+              <button type="button" class="clock-icon-btn" id="clk-edit-goal" title="Editar meta diária">✎</button>
+            </div>
+          </div>
+
+          <div class="daily-progress-body">
+            <div class="daily-stat">
+              <span class="daily-stat-label">Ontem</span>
+              <strong class="daily-stat-val" id="clk-yest-val">${st.yesterdayMin}</strong>
+              <span class="daily-stat-unit" id="clk-yest-unit">${st.yesterdayMin === 1 ? 'minuto' : 'minutos'}</span>
+            </div>
+
+            <div class="goal-ring-wrap">
+              <svg class="goal-ring-svg" viewBox="0 0 210 210">
+                <circle class="goal-ring-bg" cx="105" cy="105" r="${GOAL_RADIUS}"></circle>
+                <circle
+                  class="goal-ring-fg"
+                  id="clk-goal-arc"
+                  cx="105"
+                  cy="105"
+                  r="${GOAL_RADIUS}"
+                  stroke-dasharray="${GOAL_CIRC}"
+                  stroke-dashoffset="${goalDashOffset}"
+                ></circle>
+              </svg>
+              <div class="goal-ring-center">
+                <span>Meta diária</span>
+                <strong id="clk-goal-val">${gDisp.value}</strong>
+                <span id="clk-goal-unit">${gDisp.unit}</span>
+              </div>
+            </div>
+
+            <div class="daily-stat">
+              <span class="daily-stat-label">Sequência</span>
+              <strong class="daily-stat-val" id="clk-streak-val">${st.streak}</strong>
+              <span class="daily-stat-unit" id="clk-streak-unit">${st.streak === 1 ? 'dia' : 'dias'}</span>
+            </div>
+          </div>
+
+          <p class="daily-completed-text" id="clk-completed-txt">
+            Concluído: ${st.todayMin} ${st.todayMin === 1 ? 'minuto' : 'minutos'}
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  bindClockViewEvents();
+}
+
+function adjustSessionMinutes(delta) {
+  const next = Math.max(
+    MIN_SESSION_MIN,
+    Math.min(MAX_SESSION_MIN, state.focus.sessionMin + delta)
+  );
+  if (next === state.focus.sessionMin) return;
+  state.focus.sessionMin = next;
+  persistAndSyncFocus();
+  drawClock();
+}
+
+function openGoalModal() {
+  const dlg = $('gdlg');
+  if (!dlg) return;
+  const k = keyOf(todayN());
+  $('ggoal').value = state.focus.dailyGoalMin;
+  $('gtoday').value = state.focus.history[k] || 0;
+  $('gerr').textContent = '';
+  dlg.showModal();
+  $('ggoal').focus();
+}
+
+function saveGoalModal() {
+  const goal = Math.round(+$('ggoal').value);
+  const todayVal = Math.round(+$('gtoday').value || 0);
+  if (!(goal >= 15 && goal <= 960)) {
+    $('gerr').textContent = 'Defina uma meta diária entre 15 e 960 minutos (16h).';
+    return;
+  }
+  if (todayVal < 0 || todayVal > 1440) {
+    $('gerr').textContent = 'O tempo concluído hoje deve estar entre 0 e 1440 minutos.';
+    return;
+  }
+  state.focus.dailyGoalMin = goal;
+  const k = keyOf(todayN());
+  state.focus.history = state.focus.history || {};
+  state.focus.history[k] = todayVal;
+  persistAndSyncFocus();
+  $('gdlg').close();
+  drawClock();
+}
+
+function openClockConfigModal() {
+  const dlg = $('cdlg');
+  if (!dlg) return;
+  $('cblock').value = String(state.focus.blockMin || 60);
+  $('cbreak').value = String(state.focus.breakMin || 5);
+  $('csound').checked = state.focus.sound !== false;
+  dlg.showModal();
+}
+
+function saveClockConfigModal() {
+  state.focus.blockMin = Math.max(15, Math.min(120, +$('cblock').value || 60));
+  state.focus.breakMin = Math.max(1, Math.min(60, +$('cbreak').value || 5));
+  state.focus.sound = !!$('csound').checked;
+  persistAndSyncFocus();
+  $('cdlg').close();
+  drawClock();
+}
+
+function bindClockViewEvents() {
+  const incBtn = $('clk-inc');
+  const decBtn = $('clk-dec');
+  const skipChk = $('clk-skip-chk');
+  const startBtn = $('clk-start-btn');
+  const pauseBtn = $('clk-pause-btn');
+  const skipStepBtn = $('clk-skip-step-btn');
+  const stopBtn = $('clk-stop-btn');
+  const editGoalBtn = $('clk-edit-goal');
+  const cfgBtn = $('clk-cfg-btn');
+
+  if (incBtn) incBtn.onclick = () => adjustSessionMinutes(SESSION_STEP_MIN);
+  if (decBtn) decBtn.onclick = () => adjustSessionMinutes(-SESSION_STEP_MIN);
+  if (skipChk) {
+    skipChk.onchange = () => {
+      state.focus.skipBreaks = skipChk.checked;
+      persistAndSyncFocus();
+      drawClock();
+    };
+  }
+  if (startBtn) startBtn.onclick = startFocusSession;
+  if (pauseBtn) pauseBtn.onclick = togglePauseSession;
+  if (skipStepBtn) skipStepBtn.onclick = advanceSessionStep;
+  if (stopBtn) stopBtn.onclick = () => stopFocusSession(true);
+  if (editGoalBtn) editGoalBtn.onclick = openGoalModal;
+  if (cfgBtn) cfgBtn.onclick = openClockConfigModal;
+}
+
+/**
+ * Inicializa os modais e listeners da Aba Relógio.
+ */
+function initClockTab() {
+  const gdlg = $('gdlg');
+  if (gdlg) {
+    $('gok').onclick = saveGoalModal;
+    $('gcancel').onclick = () => gdlg.close();
+    $('ggoal').onkeydown = (e) => {
+      if (e.key === 'Enter') saveGoalModal();
+    };
+    gdlg.addEventListener('click', (e) => {
+      if (e.target === gdlg) gdlg.close();
+    });
+  }
+
+  const cdlg = $('cdlg');
+  if (cdlg) {
+    $('cok').onclick = saveClockConfigModal;
+    $('ccancel').onclick = () => cdlg.close();
+    cdlg.addEventListener('click', (e) => {
+      if (e.target === cdlg) cdlg.close();
+    });
+  }
+}
+
+
+/* === js/core/health.js === */
+/**
+ * @fileoverview Suíte Pré-definida de Testes de Qualidade e Saúde do Programa (Self-Diagnostic Suite).
+ * Executa automaticamente na inicialização do aplicativo (e via terminal) para validar
+ * datas, segurança XSS, cálculo de ofensivas, regras de créditos, sessões de foco e integridade do DOM.
+ */
+
+/**
+ * Executa todos os testes de saúde e qualidade do sistema.
+ * @param {{checkDOM?: boolean, silent?: boolean}} [options]
+ * @returns {{passed: number, failed: number, total: number, results: Array<{name: string, ok: boolean, error?: string}>}}
+ */
+function runHealthCheck(options = {}) {
+  const checkDOM = options.checkDOM ?? typeof document !== 'undefined';
+  const silent = options.silent ?? false;
+  const results = [];
+
+  function test(name, fn) {
+    try {
+      fn();
+      results.push({ name, ok: true });
+    } catch (err) {
+      results.push({
+        name,
+        ok: false,
+        error: err && err.message ? err.message : String(err),
+      });
+    }
+  }
+
+  function assert(condition, msg) {
+    if (!condition) throw new Error(msg || 'Falha de asserção');
+  }
+
+  // 1. Motor de Datas UTC
+  test('Datas UTC: conversão keyOf <-> parseKey e ano bissexto', () => {
+    const sampleDay = 20742; // 2026-10-16
+    const iso = keyOf(sampleDay);
+    assert(iso === '2026-10-16', `Esperado 2026-10-16, obtido ${iso}`);
+    assert(parseKey(iso) === sampleDay, 'parseKey deve reverter keyOf com exatidão');
+    assert(fmtD(sampleDay) === '16/10/2026', 'fmtD deve formatar DD/MM/AAAA');
+    assert(dim(2024, 1) === 29, 'Fevereiro de 2024 (bissexto) deve ter 29 dias');
+    assert(dim(2026, 1) === 28, 'Fevereiro de 2026 deve ter 28 dias');
+    assert(dow(sampleDay) >= 0 && dow(sampleDay) <= 6, 'dow deve estar entre 0 e 6');
+    assert(nWeeks(2026, 9) >= 4 && nWeeks(2026, 9) <= 6, 'nWeeks válido');
+  });
+
+  // 2. Segurança XSS
+  test('Segurança: escape de caracteres HTML (XSS)', () => {
+    const dirty = `<script>alert("x"&'y')</script>`;
+    const clean = esc(dirty);
+    assert(!clean.includes('<') && !clean.includes('>'), 'Tags HTML devem ser escapadas');
+    assert(clean.includes('&lt;script&gt;'), 'Deve conter entidades escapadas');
+  });
+
+  // 3. Regras do Tanque de Lazer (0,5 crédito por hábito = 10 min)
+  test('Tanque de Lazer: constantes de conversão de créditos', () => {
+    assert(MINS === 20, '1 crédito deve equivaler a 20 minutos');
+    assert(PER === 0.5, 'Cada 0,5h de estudo deve gerar 1 crédito');
+    assert(HABCREDIT === 0.5, 'Cada hábito concluído deve valer 0,5 crédito');
+    assert(HABMIN === 10, 'Cada hábito concluído deve somar 10 minutos de lazer');
+  });
+
+  // 4. Cálculo de Ofensivas (Streaks) de Hábitos
+  test('Hábitos: cálculo de ofensiva atual e recorde (stats)', () => {
+    const t = 20000;
+    const h = {
+      dates: [keyOf(t - 5), keyOf(t - 4), keyOf(t - 3), keyOf(t - 1)],
+    };
+    const st = stats(h);
+    assert(st.best === 3, `Melhor ofensiva esperada 3, obtida ${st.best}`);
+    assert(st.total === 4, `Total esperado 4, obtido ${st.total}`);
+  });
+
+  // 5. Relógio de Foco: Cálculo de Intervalos e Plano de Sessão
+  test('Relógio de Foco: cálculo de intervalos e plano de 180 min', () => {
+    assert(
+      calcFocusIntervals(180, false, 60) === 2,
+      '180 min com blocos de 60 min deve ter 2 intervalos'
+    );
+    assert(
+      calcFocusIntervals(180, true, 60) === 0,
+      'Com "Pular pausas" marcado deve ter 0 intervalos'
+    );
+    assert(
+      calcFocusIntervals(45, false, 60) === 0,
+      'Sessão menor ou igual ao bloco deve ter 0 intervalos'
+    );
+
+    const plan = buildSessionPlan(180, false, 60, 5);
+    assert(plan.breakCount === 2, 'Plano de 180 min deve conter 2 pausas');
+    assert(plan.steps.length === 5, 'Plano deve ter 3 blocos de foco + 2 pausas = 5 etapas');
+    const sumFocus = plan.steps
+      .filter((s) => s.type === 'focus')
+      .reduce((acc, s) => acc + s.minutes, 0);
+    assert(sumFocus === 180, `Soma dos blocos de foco deve ser 180, obtido ${sumFocus}`);
+    assert(plan.steps[1].type === 'break' && plan.steps[1].minutes === 5, 'Pausa deve ter 5 min');
+  });
+
+  // 6. Relógio de Foco: Andamento Diário, Sequência e Formatação
+  test('Relógio de Foco: andamento diário, meta e sequência de dias', () => {
+    const fakeToday = 20742;
+    const hist = {
+      [keyOf(fakeToday - 3)]: 240,
+      [keyOf(fakeToday - 2)]: 250,
+      [keyOf(fakeToday - 1)]: 240,
+      [keyOf(fakeToday)]: 53,
+    };
+    const st = calcDailyFocusStats(hist, 240, fakeToday);
+    assert(st.todayMin === 53, `Hoje esperado 53 min, obtido ${st.todayMin}`);
+    assert(st.yesterdayMin === 240, `Ontem esperado 240 min, obtido ${st.yesterdayMin}`);
+    assert(st.streak === 3, `Sequência esperada 3 dias (ontem + 2 anteriores), obtido ${st.streak}`);
+    assert(st.progressPct === Math.round((53 / 240) * 100), 'Percentual da meta incorreto');
+
+    const disp = formatGoalDisplay(240);
+    assert(disp.value === '4' && disp.unit === 'horas', '240 min deve exibir 4 horas');
+    assert(formatCountdown(1500) === '25:00', '1500s deve formatar como 25:00');
+    assert(formatCountdown(3661) === '01:01:01', '3661s deve formatar como 01:01:01');
+  });
+
+  // 7. Integridade do Estado e DOM (quando no navegador)
+  if (checkDOM) {
+    test('Integridade do DOM e Estado da Aplicação', () => {
+      const requiredIds = [
+        'app',
+        'tH',
+        'tD',
+        'tB',
+        'tC',
+        'main',
+        'dash',
+        'bank',
+        'clock',
+        'dlg',
+        'ddlg',
+        'fdlg',
+        'bdlg',
+        'rdlg',
+        'sdlg',
+        'qdlg',
+        'gdlg',
+        'cdlg',
+      ];
+      for (const id of requiredIds) {
+        assert($(id) !== null, `Elemento obrigatório #${id} ausente no DOM`);
+      }
+      assert(Array.isArray(state.habits), 'state.habits deve ser um Array');
+      assert(Array.isArray(state.bank), 'state.bank deve ser um Array');
+      assert(state.focus && typeof state.focus === 'object', 'state.focus deve existir');
+    });
+  }
+
+  const passed = results.filter((r) => r.ok).length;
+  const failed = results.length - passed;
+
+  if (!silent) {
+    if (failed === 0) {
+      console.info(`✅ [HealthCheck] Todos os ${passed}/${results.length} testes de saúde passaram.`);
+    } else {
+      console.error(
+        `❌ [HealthCheck] ${failed} falha(s) em ${results.length} testes:`,
+        results.filter((r) => !r.ok)
+      );
+    }
+  }
+
+  return { passed, failed, total: results.length, results };
+}
+
+
 /* === js/main.js === */
 /**
  * @fileoverview Bootstrapper principal da aplicação.
- * Conecta o roteamento de abas (Hábitos, Dashboard, Banco de Horas),
- * inicializa os módulos independentes e dispara a sincronização inicial.
+ * Conecta o roteamento de abas (Hábitos, Dashboard, Banco de Horas, Relógio),
+ * inicializa os módulos independentes, executa a suíte de testes de saúde e dispara a sincronização.
  */
 
 /**
  * Alterna a aba ativa do aplicativo.
- * @param {'habits'|'dash'|'bank'} view
+ * @param {'habits'|'dash'|'bank'|'clock'} view
  */
 function setView(view) {
   state.activeTab = view;
@@ -1837,11 +2736,13 @@ function setView(view) {
   $('main').style.display = view === 'habits' ? '' : 'none';
   $('dash').style.display = view === 'dash' ? '' : 'none';
   $('bank').style.display = view === 'bank' ? '' : 'none';
+  $('clock').style.display = view === 'clock' ? '' : 'none';
 
   [
     ['tH', 'habits'],
     ['tD', 'dash'],
     ['tB', 'bank'],
+    ['tC', 'clock'],
   ].forEach(([id, key]) => $(id).classList.toggle('on', key === view));
 
   $('tank').style.display = view === 'bank' ? '' : 'none';
@@ -1849,6 +2750,7 @@ function setView(view) {
   if (view === 'habits') renderHabits();
   if (view === 'dash') drawDash();
   if (view === 'bank') drawBank();
+  if (view === 'clock') drawClock();
 }
 
 function initApp() {
@@ -1862,22 +2764,29 @@ function initApp() {
     if (state.activeTab === 'habits') renderHabits();
     if (state.activeTab === 'dash') drawDash();
     if (state.activeTab === 'bank') drawBank();
+    if (state.activeTab === 'clock') drawClock();
   });
 
   // Navegação entre abas
   $('tH').onclick = () => setView('habits');
   $('tD').onclick = () => setView('dash');
   $('tB').onclick = () => setView('bank');
+  $('tC').onclick = () => setView('clock');
 
   // Inicializa cada módulo de aba e modais
   initHabitsTab();
   initBankTab();
+  initClockTab();
   initReportsModal();
   initSupabaseModal();
 
   // Posiciona na semana de hoje e sincroniza com o Supabase
   goToday();
   sync();
+
+  // Executa os testes de saúde e qualidade do programa na inicialização
+  window.runHealthCheck = runHealthCheck;
+  runHealthCheck();
 }
 
 initApp();

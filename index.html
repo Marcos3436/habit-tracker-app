@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./css/main.css" onerror="this.onerror=null;this.href='https://marcos3436.github.io/habit-tracker/css/main.css'">
+  <link rel="stylesheet" href="./css/main.css" onerror="this.onerror=null;this.href='https://marcos3436.github.io/habit-tracker-app/css/main.css'">
 </head>
 <body>
   <div id="app">
@@ -23,6 +23,7 @@
         <button type="button" class="tab on" id="tH">Hábitos</button>
         <button type="button" class="tab" id="tD">Dashboard</button>
         <button type="button" class="tab" id="tB">Banco de horas</button>
+        <button type="button" class="tab" id="tC">Relógio</button>
       </nav>
 
       <button type="button" class="add hv" id="new">+ Novo Hábito</button>
@@ -52,10 +53,11 @@
       <button type="button" class="icon" id="theme" aria-label="Alternar tema">🌙</button>
     </header>
 
-    <!-- Containers das 3 Abas Principais -->
+    <!-- Containers das 4 Abas Principais -->
     <main class="main" id="main"></main>
     <section class="main" id="dash" style="display:none"></section>
     <section class="main" id="bank" style="display:none"></section>
+    <section class="main" id="clock" style="display:none"></section>
   </div>
 
   <!-- Widget Flutuante: Tanque de Lazer (Aba Banco de Horas) -->
@@ -170,6 +172,37 @@
     </div>
   </dialog>
 
+  <!-- Modal: Editar Meta Diária de Foco -->
+  <dialog id="gdlg">
+    <strong class="dialog-title">Editar andamento diário</strong>
+    <label class="lab" for="ggoal">Meta diária de foco (em minutos — ex.: 240 = 4 horas)</label>
+    <input id="ggoal" type="number" min="15" max="960" step="15" value="240">
+    <label class="lab" for="gtoday">Tempo já concluído hoje (em minutos)</label>
+    <input id="gtoday" type="number" min="0" max="1440" step="1" value="0">
+    <p id="gerr" class="err"></p>
+    <div class="acts">
+      <button type="button" id="gcancel">Cancelar</button>
+      <button type="button" class="ok" id="gok">Salvar</button>
+    </div>
+  </dialog>
+
+  <!-- Modal: Configurar Intervalos do Relógio de Foco -->
+  <dialog id="cdlg">
+    <strong class="dialog-title">Configurações das sessões</strong>
+    <label class="lab" for="cblock">Duração máxima de cada bloco de foco (min)</label>
+    <input id="cblock" type="number" min="15" max="120" step="5" value="60">
+    <label class="lab" for="cbreak">Duração de cada intervalo / pausa (min)</label>
+    <input id="cbreak" type="number" min="1" max="60" step="1" value="5">
+    <label class="focus-skip-label" style="margin-top:8px">
+      <input type="checkbox" id="csound" checked>
+      <span>Tocar som suave ao concluir cada etapa</span>
+    </label>
+    <div class="acts">
+      <button type="button" id="ccancel">Cancelar</button>
+      <button type="button" class="ok" id="cok">Salvar</button>
+    </div>
+  </dialog>
+
   <!-- Modal Global de Confirmação -->
   <dialog id="qdlg">
     <p id="qmsg"></p>
@@ -188,7 +221,7 @@
     s.src = './js/file-fallback.js';
     s.onerror = () => {
       const r = document.createElement('script');
-      r.src = 'https://marcos3436.github.io/habit-tracker/js/file-fallback.js';
+      r.src = 'https://marcos3436.github.io/habit-tracker-app/js/file-fallback.js';
       document.body.appendChild(r);
     };
     document.body.appendChild(s);

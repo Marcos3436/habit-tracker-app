@@ -9,6 +9,7 @@ import {
   notifyUI,
   persistRw,
   saveBank,
+  saveFocus,
   saveHabits,
   state,
 } from './state.js';
@@ -302,6 +303,56 @@ async function syncReward() {
   }
 }
 
+/* ---------- Sincronização do Relógio de Foco ---------- */
+
+export async function pushFocus() {
+  try {
+    await sb('focus_state', {
+      method: 'POST',
+      headers: UP,
+      body: JSON.stringify([
+        {
+          id: 'main',
+          daily_goal_min: state.focus.dailyGoalMin,
+          session_min: state.focus.sessionMin,
+          skip_breaks: state.focus.skipBreaks,
+          block_min: state.focus.blockMin,
+          break_min: state.focus.breakMin,
+          history: state.focus.history || {},
+          updated_at: new Date(state.focus.at || Date.now()).toISOString(),
+        },
+      ]),
+    });
+  } catch (_) {
+    // Ignora silenciosamente caso a tabela opcional focus_state ainda não tenha sido criada no Supabase
+  }
+}
+
+async function syncFocus() {
+  if (!isCloudOn()) return;
+  try {
+    const rows = await sb('focus_state?id=eq.main&select=*');
+    const r = rows && rows[0];
+    const ra = r ? Date.parse(r.updated_at) : 0;
+    if (r && ra > (state.focus.at || 0)) {
+      state.focus.dailyGoalMin = +r.daily_goal_min || 240;
+      state.focus.sessionMin = +r.session_min || 180;
+      state.focus.skipBreaks = !!r.skip_breaks;
+      state.focus.blockMin = +r.block_min || 60;
+      state.focus.breakMin = +r.break_min || 5;
+      const mergedHist = { ...(r.history || {}) };
+      for (const [day, min] of Object.entries(state.focus.history || {})) {
+        mergedHist[day] = Math.max(mergedHist[day] || 0, min || 0);
+      }
+      state.focus.history = mergedHist;
+      state.focus.at = ra;
+      saveFocus();
+    } else {
+      await pushFocus();
+    }
+  } catch (_) {}
+}
+
 /* ---------- Sincronização Geral (Inicialização e Manual) ---------- */
 
 export async function sync() {
@@ -353,6 +404,7 @@ export async function sync() {
     try {
       await syncBank();
       await syncReward();
+      await syncFocus();
     } catch (e) {
       bankErr = e.message;
     }
