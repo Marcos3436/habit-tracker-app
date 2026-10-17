@@ -1,7 +1,7 @@
 {
-  "name": "Melhoria pessoal diária",
+  "name": "Rabitu",
   "short_name": "Rabitu",
-  "description": "Rastreador de hábitos diários, dashboard analítico, banco de horas de estudo e tanque de lazer.",
+  "description": "Rabitu — Rastreador de hábitos diários, dashboard analítico, banco de horas, tanque de lazer e relógio de foco.",
   "lang": "pt-BR",
   "start_url": "./index.html",
   "display": "standalone",

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Melhoria pessoal diária</title>
+  <title>Rabitu</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,7 +16,7 @@
     <header class="top">
       <div class="logo">
         <b></b>
-        <span>Melhoria pessoal diária</span>
+        <span>Rabitu</span>
       </div>
 
       <nav class="tabs" aria-label="Navegação principal">
@@ -61,7 +61,7 @@
   </div>
 
   <!-- Widget Flutuante: Tanque de Lazer (Aba Banco de Horas) -->
-  <aside class="tank" id="tank" style="display:none" title="1 crédito = 20 minutos de lazer" data-tip-delay="2000">
+  <aside class="tank" id="tank" style="display:none" title="1 crédito = 20 minutos de lazer">
     <strong>Tanque de lazer</strong>
     <div class="tk">
       <div class="lq" id="lq"></div>
@@ -186,17 +186,25 @@
     </div>
   </dialog>
 
-  <!-- Modal: Configurar Intervalos do Relógio de Foco -->
+  <!-- Modal: Configurar Intervalos e Som do Relógio de Foco -->
   <dialog id="cdlg">
     <strong class="dialog-title">Configurações das sessões</strong>
     <label class="lab" for="cblock">Duração máxima de cada bloco de foco (min)</label>
     <input id="cblock" type="number" min="15" max="120" step="5" value="60">
     <label class="lab" for="cbreak">Duração de cada intervalo / pausa (min)</label>
     <input id="cbreak" type="number" min="1" max="60" step="1" value="5">
-    <label class="focus-skip-label" style="margin-top:8px">
-      <input type="checkbox" id="csound" checked>
-      <span>Tocar som suave ao concluir cada etapa</span>
-    </label>
+    <label class="lab" for="csound">Som de alarme ao concluir etapa</label>
+    <div class="sound-picker-row">
+      <select id="csound">
+        <option value="chime">Sino Suave (Chime)</option>
+        <option value="bell">Campainha Cristalina</option>
+        <option value="digital">Alarme Digital (Beep)</option>
+        <option value="marimba">Marimba Zen</option>
+        <option value="harp">Harpa Celestial</option>
+        <option value="off">Silencioso (Sem som)</option>
+      </select>
+      <button type="button" class="sound-test-btn" id="csound-test">🔊 Testar</button>
+    </div>
     <div class="acts">
       <button type="button" id="ccancel">Cancelar</button>
       <button type="button" class="ok" id="cok">Salvar</button>
