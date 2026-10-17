@@ -1,4 +1,4 @@
-/* Fallback automatico para execucao direta via protocolo file:// (duplo-clique no index.html sem servidor HTTP) */
+/* Gerado por scripts/release.mjs — NÃO editar à mão. Fallback para execução direta via file:// */
 (() => {
 'use strict';
 
@@ -2064,18 +2064,81 @@ function formatCountdown(totalSeconds) {
    ========================================================================== */
 
 /**
- * Toca o som de alarme selecionado usando Web Audio API.
- * @param {string} [soundType] ID do som ('chime'|'bell'|'digital'|'marimba'|'harp'|'off')
+ * Resolve qual alarme deve tocar a partir das configurações salvas (função pura).
+ * @param {{sound?: boolean, soundType?: string}} focus
+ * @returns {string} ID do som válido ('off' quando silenciado)
+ */
+function resolveAlarmId(focus = {}) {
+  if (focus.sound === false || focus.soundType === 'off') return 'off';
+  return ALARM_SOUNDS.some((s) => s.id === focus.soundType) ? focus.soundType : 'chime';
+}
+
+/**
+ * Monta a notificação de transição entre etapas da sessão (função pura).
+ * @param {{type: string, minutes?: number, label?: string}|undefined} finishedStep Etapa que acabou de terminar
+ * @param {{type: string, minutes: number, label: string}|undefined} nextStep Próxima etapa (undefined = sessão acabou)
+ * @returns {{title: string, body: string}|null}
+ */
+function buildPhaseNotification(finishedStep, nextStep) {
+  if (!nextStep) {
+    return {
+      title: '🏆 Sessão de concentração concluída!',
+      body: 'Excelente trabalho! Você finalizou todas as etapas da sua sessão de foco.',
+    };
+  }
+  if (finishedStep && finishedStep.type === 'focus' && nextStep.type === 'break') {
+    return {
+      title: '☕ Hora do intervalo!',
+      body: `Bloco de foco concluído. Aproveite ${nextStep.minutes} min de pausa para descansar.`,
+    };
+  }
+  if (finishedStep && finishedStep.type === 'break' && nextStep.type === 'focus') {
+    return {
+      title: '🎯 Fim do intervalo!',
+      body: `Hora de retomar a concentração: ${nextStep.label} (${nextStep.minutes} min).`,
+    };
+  }
+  return null;
+}
+
+/**
+ * Indica se o último incremento de minutos fez a meta diária ser batida agora (função pura).
+ * @param {number} before Minutos antes do incremento
+ * @param {number} after Minutos depois do incremento
+ * @param {number} goal Meta diária
+ * @returns {boolean}
+ */
+function justReachedGoal(before, after, goal) {
+  return before < goal && after >= goal;
+}
+
+let sharedAudioCtx = null;
+
+function getAudioContext() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!sharedAudioCtx || sharedAudioCtx.state === 'closed') sharedAudioCtx = new Ctx();
+  if (sharedAudioCtx.state === 'suspended') sharedAudioCtx.resume().catch(() => {});
+  return sharedAudioCtx;
+}
+
+/**
+ * Toca um som de alarme usando Web Audio API.
+ * Sem argumento toca o alarme configurado (respeitando "Silencioso").
+ * Com `soundType` explícito é uma PRÉVIA: toca mesmo que o alarme salvo esteja silenciado,
+ * para que o usuário possa ouvir antes de aplicar.
+ * @param {string} [soundType] 'chime'|'bell'|'digital'|'marimba'|'harp'
+ * @returns {boolean} true se algum som foi disparado
  */
 function playAlarmSound(soundType) {
-  const type = soundType ?? state.focus.soundType ?? 'chime';
-  if (type === 'off' || state.focus.sound === false) return;
+  const isPreview = soundType !== undefined;
+  const type = isPreview ? soundType : resolveAlarmId(state.focus);
+  if (type === 'off') return false;
 
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const now = ctx.currentTime;
+    const ctx = getAudioContext();
+    if (!ctx) return false;
+    const now = ctx.currentTime + 0.02;
 
     const tone = (freq, start, dur, wave = 'sine', vol = 0.16) => {
       const osc = ctx.createOscillator();
@@ -2117,27 +2180,40 @@ function playAlarmSound(soundType) {
         tone(f, i * 0.15, 0.5, 'sine', 0.15);
       });
     }
-  } catch (_) {}
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 /**
- * Solicita permissão e envia uma notificação nativa do Windows / Sistema Operacional.
+ * Envia uma notificação do sistema.
+ * No app Desktop (Electron) usa a ponte nativa `window.rabituNative` (processo principal,
+ * toast do Windows com AppUserModelID registrado). No navegador cai na Notification API da Web.
+ * Nunca lança exceção: o resultado descreve o que aconteceu (útil para diagnóstico).
  * @param {string} title Título da notificação
  * @param {string} body Corpo da mensagem
+ * @returns {Promise<{channel: 'native'|'web'|'unsupported'|'denied', ok: boolean, error?: string}>}
  */
-function sendWindowsNotification(title, body) {
+async function sendWindowsNotification(title, body) {
   try {
-    if (typeof Notification === 'undefined') return;
-    if (Notification.permission === 'granted') {
-      new Notification(title, { body, silent: false });
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then((perm) => {
-        if (perm === 'granted') {
-          new Notification(title, { body, silent: false });
-        }
-      });
+    if (window.rabituNative && typeof window.rabituNative.notify === 'function') {
+      const r = await window.rabituNative.notify(title, body);
+      return { channel: 'native', ok: !!(r && r.ok), error: r && r.error };
     }
-  } catch (_) {}
+    if (typeof Notification === 'undefined') {
+      return { channel: 'unsupported', ok: false, error: 'Notification API indisponível' };
+    }
+    let perm = Notification.permission;
+    if (perm === 'default') perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      return { channel: 'denied', ok: false, error: 'Permissão de notificação negada' };
+    }
+    new Notification(title, { body });
+    return { channel: 'web', ok: true };
+  } catch (err) {
+    return { channel: 'unsupported', ok: false, error: err && err.message ? err.message : String(err) };
+  }
 }
 
 /* ==========================================================================
@@ -2167,7 +2243,7 @@ function recordFocusMinutes(mins) {
   persistAndSyncFocus();
 
   const goal = state.focus.dailyGoalMin || 240;
-  if (before < goal && after >= goal) {
+  if (justReachedGoal(before, after, goal)) {
     sendWindowsNotification(
       '🎉 Parabéns! Meta diária atingida!',
       `Você concluiu ${after} minutos de foco hoje e bateu sua meta diária no Rabitu!`
@@ -2211,25 +2287,12 @@ function advanceSessionStep() {
   activeSession.stepIdx++;
   const nextStep = activeSession.plan.steps[activeSession.stepIdx];
 
+  const note = buildPhaseNotification(finishedStep, nextStep);
+  if (note) sendWindowsNotification(note.title, note.body);
+
   if (!nextStep) {
-    sendWindowsNotification(
-      '🏆 Sessão de concentração concluída!',
-      'Excelente trabalho! Você finalizou todas as etapas da sua sessão de foco.'
-    );
     stopFocusSession(false);
     return;
-  }
-
-  if (finishedStep && finishedStep.type === 'focus' && nextStep.type === 'break') {
-    sendWindowsNotification(
-      '☕ Hora do intervalo!',
-      `Bloco de foco concluído. Aproveite ${nextStep.minutes} min de pausa para descansar.`
-    );
-  } else if (finishedStep && finishedStep.type === 'break' && nextStep.type === 'focus') {
-    sendWindowsNotification(
-      '🎯 Fim do intervalo!',
-      `Hora de retomar a concentração: ${nextStep.label} (${nextStep.minutes} min).`
-    );
   }
 
   activeSession.accumulatedSec = 0;
@@ -2352,16 +2415,15 @@ function updateDailyProgressDOM() {
   }
 }
 
-function renderSoundOptions(selectedId) {
-  return ALARM_SOUNDS.map(
-    (s) =>
-      `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${s.label}</option>`
-  ).join('');
+function alarmLabelOf(focus) {
+  const id = resolveAlarmId(focus);
+  const found = ALARM_SOUNDS.find((s) => s.id === id);
+  return found ? found.label : 'Sino Suave (Chime)';
 }
 
 function renderLeftCardContent() {
   const f = state.focus;
-  const curSound = f.sound === false ? 'off' : f.soundType || 'chime';
+  const alarmLabel = alarmLabelOf(f);
 
   if (!activeSession) {
     const breaks = calcFocusIntervals(f.sessionMin, f.skipBreaks, f.blockMin);
@@ -2403,11 +2465,9 @@ function renderLeftCardContent() {
         </label>
 
         <div class="focus-sound-quick">
-          <span>🔔 Alarme:</span>
-          <select id="clk-quick-sound" aria-label="Som de alarme">
-            ${renderSoundOptions(curSound)}
-          </select>
-          <button type="button" id="clk-test-sound" title="Ouvir prévia do alarme">🔊</button>
+          <button type="button" class="alarm-open-btn" id="clk-alarm-btn" title="Escolher e testar o som do alarme">
+            🔔 Alarme: <b>${alarmLabel}</b> <span aria-hidden="true">›</span>
+          </button>
         </div>
 
         <div>
@@ -2613,8 +2673,8 @@ function openClockConfigModal() {
   if (!dlg) return;
   $('cblock').value = String(state.focus.blockMin || 60);
   $('cbreak').value = String(state.focus.breakMin || 5);
-  const curSound = state.focus.sound === false ? 'off' : state.focus.soundType || 'chime';
-  $('csound').value = curSound;
+  $('csound').value = resolveAlarmId(state.focus); // rascunho: só vale ao clicar em Salvar
+  setNotifyStatus('', '');
   dlg.showModal();
 }
 
@@ -2629,12 +2689,48 @@ function saveClockConfigModal() {
   drawClock();
 }
 
+function setNotifyStatus(text, kind) {
+  const el = $('cnotify-status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'notify-status' + (kind ? ' ' + kind : '');
+}
+
+/** Ouve a prévia do som escolhido no seletor (sem aplicar). */
+function previewSelectedAlarm() {
+  const id = $('csound').value;
+  if (id === 'off') {
+    setNotifyStatus('“Silencioso” selecionado: nenhum som será tocado ao fim de cada etapa.', '');
+    return;
+  }
+  const played = playAlarmSound(id);
+  if (!played) setNotifyStatus('Não foi possível reproduzir áudio neste dispositivo.', 'bad');
+}
+
+/** Envia uma notificação de teste e mostra se o sistema a aceitou. */
+async function testNotification() {
+  setNotifyStatus('Enviando…', '');
+  const r = await sendWindowsNotification(
+    '🔔 Rabitu — teste de notificação',
+    'Se você está vendo isto, as notificações das sessões de foco estão funcionando!'
+  );
+  if (r.ok) {
+    setNotifyStatus(
+      r.channel === 'native'
+        ? 'Enviada ao Windows. Se não apareceu, verifique o modo “Não incomodar” / Assistência de foco.'
+        : 'Enviada pelo navegador.',
+      'ok'
+    );
+  } else {
+    setNotifyStatus(`Não foi possível notificar (${r.error || r.channel}).`, 'bad');
+  }
+}
+
 function bindClockViewEvents() {
   const incBtn = $('clk-inc');
   const decBtn = $('clk-dec');
   const skipChk = $('clk-skip-chk');
-  const quickSound = $('clk-quick-sound');
-  const testSoundBtn = $('clk-test-sound');
+  const alarmBtn = $('clk-alarm-btn');
   const startBtn = $('clk-start-btn');
   const pauseBtn = $('clk-pause-btn');
   const skipStepBtn = $('clk-skip-step-btn');
@@ -2651,23 +2747,10 @@ function bindClockViewEvents() {
       drawClock();
     };
   }
-  if (quickSound) {
-    quickSound.onchange = () => {
-      state.focus.soundType = quickSound.value;
-      state.focus.sound = quickSound.value !== 'off';
-      persistAndSyncFocus();
-      playAlarmSound(quickSound.value);
-    };
-  }
-  if (testSoundBtn) {
-    testSoundBtn.onclick = () => {
-      const s = quickSound ? quickSound.value : state.focus.soundType;
-      playAlarmSound(s);
-    };
-  }
+  if (alarmBtn) alarmBtn.onclick = openClockConfigModal;
   if (startBtn) startBtn.onclick = startFocusSession;
   if (pauseBtn) pauseBtn.onclick = togglePauseSession;
-  if (skipStepBtn) skipStepBtn.onclick = advanceSessionStep;
+  if (skipStepBtn) skipStepBtn.onclick = () => advanceSessionStep();
   if (stopBtn) stopBtn.onclick = () => stopFocusSession(true);
   if (editGoalBtn) editGoalBtn.onclick = openGoalModal;
   if (cfgBtn) cfgBtn.onclick = openClockConfigModal;
@@ -2693,10 +2776,11 @@ function initClockTab() {
   if (cdlg) {
     $('cok').onclick = saveClockConfigModal;
     $('ccancel').onclick = () => cdlg.close();
-    const previewBtn = $('csound-test');
-    if (previewBtn) {
-      previewBtn.onclick = () => playAlarmSound($('csound').value);
-    }
+    $('csound-test').onclick = previewSelectedAlarm;
+    // Ao trocar a opção, já toca a prévia (ainda sem aplicar).
+    $('csound').onchange = previewSelectedAlarm;
+    const nbtn = $('cnotify-test');
+    if (nbtn) nbtn.onclick = testNotification;
     cdlg.addEventListener('click', (e) => {
       if (e.target === cdlg) cdlg.close();
     });
@@ -2837,6 +2921,29 @@ function runHealthCheck(options = {}) {
     assert(formatCountdown(3661) === '01:01:01', '3661s deve formatar como 01:01:01');
   });
 
+  // 6b. Relógio de Foco: alarme, notificações de fase e detecção de meta batida
+  test('Relógio de Foco: alarme escolhido, notificações de fase e meta batida', () => {
+    assert(resolveAlarmId({ sound: true, soundType: 'bell' }) === 'bell', 'Deve respeitar o som escolhido');
+    assert(resolveAlarmId({ sound: false, soundType: 'bell' }) === 'off', 'sound=false silencia o alarme');
+    assert(resolveAlarmId({ soundType: 'off' }) === 'off', 'soundType=off silencia o alarme');
+    assert(resolveAlarmId({ soundType: 'inexistente' }) === 'chime', 'Som inválido cai no padrão (chime)');
+    assert(resolveAlarmId({}) === 'chime', 'Sem configuração usa o chime');
+
+    const focus = { type: 'focus', minutes: 60, label: 'Foco (1 de 3)' };
+    const brk = { type: 'break', minutes: 5, label: 'Intervalo (1 de 2)' };
+    const n1 = buildPhaseNotification(focus, brk);
+    assert(n1 && n1.title.includes('intervalo') && n1.body.includes('5 min'), 'Fim do foco deve avisar do intervalo');
+    const n2 = buildPhaseNotification(brk, focus);
+    assert(n2 && n2.title.includes('Fim do intervalo'), 'Fim da pausa deve avisar para retomar');
+    const n3 = buildPhaseNotification(focus, undefined);
+    assert(n3 && n3.title.includes('concluída'), 'Última etapa deve avisar que a sessão acabou');
+    assert(buildPhaseNotification(focus, focus) === null, 'Foco -> foco não gera notificação');
+
+    assert(justReachedGoal(239, 240, 240) === true, 'Cruzar a meta deve disparar o parabéns');
+    assert(justReachedGoal(240, 241, 240) === false, 'Já estava batida: não repete o parabéns');
+    assert(justReachedGoal(10, 50, 240) === false, 'Abaixo da meta: sem parabéns');
+  });
+
   // 7. Integridade do Estado e DOM (quando no navegador)
   if (checkDOM) {
     test('Integridade do DOM, Identidade "Rabitu" e Estado da Aplicação', () => {
@@ -2963,5 +3070,6 @@ function initApp() {
 }
 
 initApp();
+
 
 })();

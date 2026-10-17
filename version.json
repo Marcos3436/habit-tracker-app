@@ -1,5 +1,5 @@
-﻿{
-  "version": 12,
+{
+  "version": 13,
   "files": [
     "index.html",
     "manifest.json",
@@ -22,5 +22,28 @@
     "js/tabs/bank.js",
     "js/tabs/clock.js",
     "js/tabs/reports.js"
-  ]
+  ],
+  "hashes": {
+    "index.html": "ee593efeee0b4c842aa01e411136963e033446541613475d69070e7694a0a192",
+    "manifest.json": "8dc6621504fc60c156fb52ea90e71ff212712bd6b17177d7f8464299bb27cdc9",
+    "css/main.css": "37c689098697b173fdaf3630faae29a861149090aa62c4d5e0a1ef275afe5f61",
+    "css/base.css": "f9730a4500a539db98b048d93ef121c306a155afbe4b7c57365ad738178c2ba5",
+    "css/components.css": "765f08b069798758f2d773d128800c3711bf58aaf411270071e89ac573f51233",
+    "css/habits.css": "d3d5efedd240893f8a63d3a485fb530c49dd69de147a623d16a061d7d7e247ee",
+    "css/dashboard.css": "cd02dc8f3bbb1ede94977d4d1ba62772ddb1bedb21e5e8e33bba9b539391d782",
+    "css/bank.css": "7c99f34bb9139ef11d3cc28a44de431961142d8afafd4c6a3b77fb7d5daadc1c",
+    "css/clock.css": "77aa74f813276d7cdb23f2eb8407e5e0f2469455a27036f664befdc6fdddfcff",
+    "js/main.js": "ba681c1781b8d795a6e30d2cb5f24a96f4ce5aafa6a79a9ef96eca4d0e2f136f",
+    "js/file-fallback.js": "0901b165a6df4751f2a8a151c7a999703b50e5e560291e7f5fc55c3a49b030a4",
+    "js/core/dates.js": "aea3ab79a98791ea2e0ef049f51ca9e6bf91e04b99922ba699fd9d9f3bec3a85",
+    "js/core/dom.js": "fa1524ac5e8e92d3837403ce420f960f30d644b9305b3020aaf0dcaf90133c2c",
+    "js/core/state.js": "d60a5210a080c3f0543d011b02babb52dfcbf332ec5007fb69e64c6a100cb40f",
+    "js/core/supabase.js": "5ce3454dc10246dc9819ac58fed7c35244f92ed71302281e1382849f49091ee2",
+    "js/core/health.js": "d258887234790d48a58c385566023a8f77b6920c2da4319a34da7324d17b6351",
+    "js/tabs/habits.js": "68fa7aaacd1747448c9ceeb599fe52586f9812d2e576d09031212dc389efe2bd",
+    "js/tabs/dashboard.js": "38a69dccfd7251503b625c26f643fcee52280cff65b706ba82cda68032f61fa2",
+    "js/tabs/bank.js": "36e550e1b410237fa180f009d702d2cb9309a3dceed870dcaff87bc3d45ea4ce",
+    "js/tabs/clock.js": "414716fe91483ed4a3603d11a8345e65ed028d3d42ff4618c83180b6a6a4e50a",
+    "js/tabs/reports.js": "4c3450c4fb4284b91553072f511cf7125d307131023208025f0a8fbbf0218ec5"
+  }
 }

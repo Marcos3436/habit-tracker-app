@@ -10,11 +10,14 @@ import { $, DEFAULT_TIP_DELAY, esc } from './dom.js';
 import { HABCREDIT, HABMIN, MINS, PER, state, stats } from './state.js';
 import {
   ALARM_SOUNDS,
+  buildPhaseNotification,
   buildSessionPlan,
   calcDailyFocusStats,
   calcFocusIntervals,
   formatCountdown,
   formatGoalDisplay,
+  justReachedGoal,
+  resolveAlarmId,
 } from '../tabs/clock.js';
 
 /**
@@ -140,6 +143,29 @@ export function runHealthCheck(options = {}) {
     assert(disp.value === '4' && disp.unit === 'horas', '240 min deve exibir 4 horas');
     assert(formatCountdown(1500) === '25:00', '1500s deve formatar como 25:00');
     assert(formatCountdown(3661) === '01:01:01', '3661s deve formatar como 01:01:01');
+  });
+
+  // 6b. Relógio de Foco: alarme, notificações de fase e detecção de meta batida
+  test('Relógio de Foco: alarme escolhido, notificações de fase e meta batida', () => {
+    assert(resolveAlarmId({ sound: true, soundType: 'bell' }) === 'bell', 'Deve respeitar o som escolhido');
+    assert(resolveAlarmId({ sound: false, soundType: 'bell' }) === 'off', 'sound=false silencia o alarme');
+    assert(resolveAlarmId({ soundType: 'off' }) === 'off', 'soundType=off silencia o alarme');
+    assert(resolveAlarmId({ soundType: 'inexistente' }) === 'chime', 'Som inválido cai no padrão (chime)');
+    assert(resolveAlarmId({}) === 'chime', 'Sem configuração usa o chime');
+
+    const focus = { type: 'focus', minutes: 60, label: 'Foco (1 de 3)' };
+    const brk = { type: 'break', minutes: 5, label: 'Intervalo (1 de 2)' };
+    const n1 = buildPhaseNotification(focus, brk);
+    assert(n1 && n1.title.includes('intervalo') && n1.body.includes('5 min'), 'Fim do foco deve avisar do intervalo');
+    const n2 = buildPhaseNotification(brk, focus);
+    assert(n2 && n2.title.includes('Fim do intervalo'), 'Fim da pausa deve avisar para retomar');
+    const n3 = buildPhaseNotification(focus, undefined);
+    assert(n3 && n3.title.includes('concluída'), 'Última etapa deve avisar que a sessão acabou');
+    assert(buildPhaseNotification(focus, focus) === null, 'Foco -> foco não gera notificação');
+
+    assert(justReachedGoal(239, 240, 240) === true, 'Cruzar a meta deve disparar o parabéns');
+    assert(justReachedGoal(240, 241, 240) === false, 'Já estava batida: não repete o parabéns');
+    assert(justReachedGoal(10, 50, 240) === false, 'Abaixo da meta: sem parabéns');
   });
 
   // 7. Integridade do Estado e DOM (quando no navegador)
