@@ -235,11 +235,13 @@ async function syncBank() {
         size: r.size,
         hours: +r.hours,
         done: [],
+        half: [],
       });
     } else {
       existing.name = r.name;
       existing.size = r.size;
       existing.hours = +r.hours;
+      existing.half = existing.half || [];
     }
   });
 
@@ -248,6 +250,7 @@ async function syncBank() {
     const b = map[r.item_id];
     if (b && r.idx < b.size && !b.done.includes(r.idx)) {
       b.done.push(r.idx);
+      b.half = (b.half || []).filter((x) => x !== r.idx);
     }
   });
   saveBank();

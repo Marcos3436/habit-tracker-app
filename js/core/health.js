@@ -8,8 +8,12 @@
 import { dim, dow, fmtD, keyOf, nWeeks, parseKey } from './dates.js';
 import { $, DEFAULT_TIP_DELAY, esc } from './dom.js';
 import { HABCREDIT, HABMIN, MINS, PER, state, stats } from './state.js';
+import { advanceBankSquareState } from '../tabs/bank.js';
 import {
+  ALARM_DURATION_MS,
+  ALARM_REPEAT_CYCLES,
   ALARM_SOUNDS,
+  NOTIFY_DURATION_MS,
   TCARD_CIRC,
   buildPhaseNotification,
   buildSessionPlan,
@@ -78,12 +82,25 @@ export function runHealthCheck(options = {}) {
     );
   });
 
-  // 3. Regras do Tanque de Lazer (0,5 crédito por hábito = 10 min)
-  test('Tanque de Lazer: constantes de conversão de créditos', () => {
+  // 3. Regras do Tanque de Lazer e Double-Check do Banco de Horas
+  test('Banco de Horas & Tanque de Lazer: créditos e double-check de atividades', () => {
     assert(MINS === 20, '1 crédito deve equivaler a 20 minutos');
     assert(PER === 0.5, 'Cada 0,5h de estudo deve gerar 1 crédito');
     assert(HABCREDIT === 0.5, 'Cada hábito concluído deve valer 0,5 crédito');
     assert(HABMIN === 10, 'Cada hábito concluído deve somar 10 minutos de lazer');
+
+    const dummyItem = { hours: 1.5, done: [], half: [] };
+    const c1 = advanceBankSquareState(dummyItem, 2);
+    assert(c1.state === 'half' && c1.hoursDelta === 0, '1º clique deve ser apenas visual (half) e somar 0h');
+    assert(dummyItem.half.includes(2) && !dummyItem.done.includes(2), '1º clique deve registrar em half e não em done');
+
+    const c2 = advanceBankSquareState(dummyItem, 2);
+    assert(c2.state === 'done' && c2.hoursDelta === 1.5, '2º clique (double-check) deve confirmar e somar 1.5h');
+    assert(!dummyItem.half.includes(2) && dummyItem.done.includes(2), '2º clique deve mover de half para done');
+
+    const c3 = advanceBankSquareState(dummyItem, 2);
+    assert(c3.state === 'empty' && c3.hoursDelta === -1.5, '3º clique deve desmarcar e estornar -1.5h');
+    assert(!dummyItem.half.includes(2) && !dummyItem.done.includes(2), '3º clique deve limpar half e done');
   });
 
   // 4. Cálculo de Ofensivas (Streaks) de Hábitos
@@ -151,8 +168,11 @@ export function runHealthCheck(options = {}) {
     assert(formatCountdown(3661) === '01:01:01', '3661s deve formatar como 01:01:01');
   });
 
-  // 6b. Relógio de Foco: alarme, notificações de fase e detecção de meta batida
-  test('Relógio de Foco: alarme escolhido, notificações de fase e meta batida', () => {
+  // 6b. Relógio de Foco: alarme de 5s, notificações de 5s e detecção de meta batida
+  test('Relógio de Foco: alarme repetitivo de 5s, notificações de 5s e meta batida', () => {
+    assert(ALARM_DURATION_MS === 5000, 'Duração do alarme sonoro deve ser 5000ms (5s)');
+    assert(ALARM_REPEAT_CYCLES === 5, 'Alarme deve repetir por 5 ciclos em 5 segundos');
+    assert(NOTIFY_DURATION_MS === 5000, 'Duração da notificação deve ser 5000ms (5s)');
     assert(resolveAlarmId({ sound: true, soundType: 'bell' }) === 'bell', 'Deve respeitar o som escolhido');
     assert(resolveAlarmId({ sound: false, soundType: 'bell' }) === 'off', 'sound=false silencia o alarme');
     assert(resolveAlarmId({ soundType: 'off' }) === 'off', 'soundType=off silencia o alarme');
@@ -194,7 +214,7 @@ export function runHealthCheck(options = {}) {
     assert(tn.title.includes('Temporizador') && tn.body.includes('CALC II') && tn.body.includes('00:30:00'), 'Notificação de temporizador deve incluir nome e duração');
   });
 
-  // 7. Integridade do Estado e DOM (quando no navegador)
+  // 7. Integridade do Estado, DOM e Estabilidade dos Modais (quando no navegador)
   if (checkDOM) {
     test('Integridade do DOM, Identidade "Rabitu" e Estado da Aplicação', () => {
       const requiredIds = [
@@ -207,6 +227,7 @@ export function runHealthCheck(options = {}) {
         'dash',
         'bank',
         'clock',
+        'app-toast',
         'dlg',
         'ddlg',
         'fdlg',
@@ -230,6 +251,32 @@ export function runHealthCheck(options = {}) {
       assert(Array.isArray(state.bank), 'state.bank deve ser um Array');
       assert(state.focus && typeof state.focus === 'object', 'state.focus deve existir');
       assert(Array.isArray(state.focus.timers), 'state.focus.timers deve ser um Array');
+    });
+
+    test('Estabilidade dos Modais (<dialog>): não fecham ao clicar fora dos campos editáveis', () => {
+      const dialogIds = ['dlg', 'ddlg', 'fdlg', 'bdlg', 'rdlg', 'sdlg', 'qdlg', 'gdlg', 'cdlg', 'tdlg'];
+      for (const id of dialogIds) {
+        const dlg = $(id);
+        assert(dlg !== null, `Modal #${id} não encontrado`);
+        const wasOpen = dlg.open;
+        if (!wasOpen) dlg.showModal();
+        try {
+          // Simula clique diretamente na superfície do <dialog> (fora dos inputs) e em rótulos internos
+          dlg.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+          dlg.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+          dlg.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          const label = dlg.querySelector('label, strong, p');
+          if (label) {
+            label.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          }
+          assert(
+            dlg.open === true,
+            `Modal #${id} fechou sozinho ao clicar fora dos campos editáveis`
+          );
+        } finally {
+          if (!wasOpen && dlg.open) dlg.close();
+        }
+      }
     });
   }
 

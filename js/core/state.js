@@ -71,6 +71,7 @@ try {
 } catch (_) {}
 loadedBank.forEach((b) => {
   b.done = b.done || [];
+  b.half = b.half || [];
 });
 
 let loadedRw = { hours: 0, spentMin: 0, habitMin: 0, at: 0 };

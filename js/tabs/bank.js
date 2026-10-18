@@ -80,18 +80,50 @@ export function addHours(delta) {
 }
 
 /**
+ * Avança o estado de um quadradinho na matriz do Banco de Horas (ciclo de double-check):
+ *  - 1º clique (vazio -> 'half'): deixa o quadrado levemente verde com borda verde escura (apenas visual, 0 crédito).
+ *  - 2º clique ('half' -> 'done'): confirma o check e contabiliza os créditos no Tanque de Lazer.
+ *  - 3º clique ('done' -> 'empty'): desmarca o quadrado e estorna os créditos.
+ * @param {{hours: number, done: number[], half?: number[]}} item
+ * @param {number} idx
+ * @returns {{state: 'half'|'done'|'empty', hoursDelta: number, remoteConfirmed: boolean|null}}
+ */
+export function advanceBankSquareState(item, idx) {
+  item.done = Array.isArray(item.done) ? item.done : [];
+  item.half = Array.isArray(item.half) ? item.half : [];
+
+  const isDone = item.done.includes(idx);
+  const isHalf = !isDone && item.half.includes(idx);
+
+  if (!isDone && !isHalf) {
+    item.half = [...item.half, idx];
+    return { state: 'half', hoursDelta: 0, remoteConfirmed: null };
+  }
+
+  if (isHalf) {
+    item.half = item.half.filter((x) => x !== idx);
+    item.done = [...item.done, idx];
+    return { state: 'done', hoursDelta: item.hours, remoteConfirmed: true };
+  }
+
+  item.done = item.done.filter((x) => x !== idx);
+  item.half = item.half.filter((x) => x !== idx);
+  return { state: 'empty', hoursDelta: -item.hours, remoteConfirmed: false };
+}
+
+/**
  * Renderiza a aba Banco de Horas (#bank).
  */
 export function drawBank() {
   const keep = $('bank').scrollTop;
   const rows = state.bank
     .map((b) => {
-      const set = new Set(b.done);
-      const squares = Array.from(
-        { length: b.size },
-        (_, i) =>
-          `<button type="button" class="sq ${set.has(i) ? 'on' : ''}" data-b="${b.id}" data-i="${i}"></button>`
-      ).join('');
+      const doneSet = new Set(b.done || []);
+      const halfSet = new Set(b.half || []);
+      const squares = Array.from({ length: b.size }, (_, i) => {
+        const cls = doneSet.has(i) ? 'on' : halfSet.has(i) ? 'half' : '';
+        return `<button type="button" class="sq ${cls}" data-b="${b.id}" data-i="${i}"></button>`;
+      }).join('');
       return `<div class="br">
         <div class="bn">
           <span>${esc(b.name)}</span>
@@ -176,13 +208,14 @@ async function saveBankForm() {
     shrink = size < b.size;
     const oldHoursEarned = b.done.length * b.hours;
     const keptDone = b.done.filter((i) => i < size);
+    const keptHalf = (b.half || []).filter((i) => i < size);
     const newHoursEarned = keptDone.length * hours;
     const deltaHours = newHoursEarned - oldHoursEarned;
 
-    Object.assign(b, { name, size, hours, done: keptDone });
+    Object.assign(b, { name, size, hours, done: keptDone, half: keptHalf });
     if (deltaHours !== 0) addHours(deltaHours);
   } else {
-    b = { id: uid(), name, size, hours, done: [] };
+    b = { id: uid(), name, size, hours, done: [], half: [] };
     state.bank.push(b);
   }
 
@@ -215,12 +248,15 @@ export function initBankTab() {
       const b = state.bank.find((x) => x.id === q.dataset.b);
       if (!b) return;
       const i = +q.dataset.i;
-      const had = b.done.includes(i);
-      b.done = had ? b.done.filter((x) => x !== i) : [...b.done, i];
+      const transition = advanceBankSquareState(b, i);
       saveBank();
-      addHours(had ? -b.hours : b.hours);
+      if (transition.hoursDelta !== 0) {
+        addHours(transition.hoursDelta);
+      }
       drawBank();
-      toggleBankSquareRemote(b.id, i, had);
+      if (transition.remoteConfirmed !== null) {
+        toggleBankSquareRemote(b.id, i, !transition.remoteConfirmed);
+      }
       return;
     }
 

@@ -309,6 +309,7 @@ try {
 } catch (_) {}
 loadedBank.forEach((b) => {
   b.done = b.done || [];
+  b.half = b.half || [];
 });
 
 let loadedRw = { hours: 0, spentMin: 0, habitMin: 0, at: 0 };
@@ -742,11 +743,13 @@ async function syncBank() {
         size: r.size,
         hours: +r.hours,
         done: [],
+        half: [],
       });
     } else {
       existing.name = r.name;
       existing.size = r.size;
       existing.hours = +r.hours;
+      existing.half = existing.half || [];
     }
   });
 
@@ -755,6 +758,7 @@ async function syncBank() {
     const b = map[r.item_id];
     if (b && r.idx < b.size && !b.done.includes(r.idx)) {
       b.done.push(r.idx);
+      b.half = (b.half || []).filter((x) => x !== r.idx);
     }
   });
   saveBank();
@@ -1027,18 +1031,50 @@ function addHours(delta) {
 }
 
 /**
+ * Avança o estado de um quadradinho na matriz do Banco de Horas (ciclo de double-check):
+ *  - 1º clique (vazio -> 'half'): deixa o quadrado levemente verde com borda verde escura (apenas visual, 0 crédito).
+ *  - 2º clique ('half' -> 'done'): confirma o check e contabiliza os créditos no Tanque de Lazer.
+ *  - 3º clique ('done' -> 'empty'): desmarca o quadrado e estorna os créditos.
+ * @param {{hours: number, done: number[], half?: number[]}} item
+ * @param {number} idx
+ * @returns {{state: 'half'|'done'|'empty', hoursDelta: number, remoteConfirmed: boolean|null}}
+ */
+function advanceBankSquareState(item, idx) {
+  item.done = Array.isArray(item.done) ? item.done : [];
+  item.half = Array.isArray(item.half) ? item.half : [];
+
+  const isDone = item.done.includes(idx);
+  const isHalf = !isDone && item.half.includes(idx);
+
+  if (!isDone && !isHalf) {
+    item.half = [...item.half, idx];
+    return { state: 'half', hoursDelta: 0, remoteConfirmed: null };
+  }
+
+  if (isHalf) {
+    item.half = item.half.filter((x) => x !== idx);
+    item.done = [...item.done, idx];
+    return { state: 'done', hoursDelta: item.hours, remoteConfirmed: true };
+  }
+
+  item.done = item.done.filter((x) => x !== idx);
+  item.half = item.half.filter((x) => x !== idx);
+  return { state: 'empty', hoursDelta: -item.hours, remoteConfirmed: false };
+}
+
+/**
  * Renderiza a aba Banco de Horas (#bank).
  */
 function drawBank() {
   const keep = $('bank').scrollTop;
   const rows = state.bank
     .map((b) => {
-      const set = new Set(b.done);
-      const squares = Array.from(
-        { length: b.size },
-        (_, i) =>
-          `<button type="button" class="sq ${set.has(i) ? 'on' : ''}" data-b="${b.id}" data-i="${i}"></button>`
-      ).join('');
+      const doneSet = new Set(b.done || []);
+      const halfSet = new Set(b.half || []);
+      const squares = Array.from({ length: b.size }, (_, i) => {
+        const cls = doneSet.has(i) ? 'on' : halfSet.has(i) ? 'half' : '';
+        return `<button type="button" class="sq ${cls}" data-b="${b.id}" data-i="${i}"></button>`;
+      }).join('');
       return `<div class="br">
         <div class="bn">
           <span>${esc(b.name)}</span>
@@ -1123,13 +1159,14 @@ async function saveBankForm() {
     shrink = size < b.size;
     const oldHoursEarned = b.done.length * b.hours;
     const keptDone = b.done.filter((i) => i < size);
+    const keptHalf = (b.half || []).filter((i) => i < size);
     const newHoursEarned = keptDone.length * hours;
     const deltaHours = newHoursEarned - oldHoursEarned;
 
-    Object.assign(b, { name, size, hours, done: keptDone });
+    Object.assign(b, { name, size, hours, done: keptDone, half: keptHalf });
     if (deltaHours !== 0) addHours(deltaHours);
   } else {
-    b = { id: uid(), name, size, hours, done: [] };
+    b = { id: uid(), name, size, hours, done: [], half: [] };
     state.bank.push(b);
   }
 
@@ -1162,12 +1199,15 @@ function initBankTab() {
       const b = state.bank.find((x) => x.id === q.dataset.b);
       if (!b) return;
       const i = +q.dataset.i;
-      const had = b.done.includes(i);
-      b.done = had ? b.done.filter((x) => x !== i) : [...b.done, i];
+      const transition = advanceBankSquareState(b, i);
       saveBank();
-      addHours(had ? -b.hours : b.hours);
+      if (transition.hoursDelta !== 0) {
+        addHours(transition.hoursDelta);
+      }
       drawBank();
-      toggleBankSquareRemote(b.id, i, had);
+      if (transition.remoteConfirmed !== null) {
+        toggleBankSquareRemote(b.id, i, !transition.remoteConfirmed);
+      }
       return;
     }
 
@@ -1874,15 +1914,9 @@ function initHabitsTab() {
   $('ppm').onclick = () => shiftDotsMonth(-1);
   $('pnm').onclick = () => shiftDotsMonth(1);
   $('pclose').onclick = () => ddlg.close();
-  ddlg.addEventListener('click', (e) => {
-    if (e.target === ddlg) ddlg.close();
-  });
 
   // Modal de Ofensiva (#fdlg)
   $('fclose').onclick = () => fdlg.close();
-  fdlg.addEventListener('click', (e) => {
-    if (e.target === fdlg) fdlg.close();
-  });
 
   // Modal de Criar / Editar Hábito (#dlg)
   $('new').onclick = () => openHabitModal();
@@ -2207,7 +2241,13 @@ function justReachedGoal(before, after, goal) {
   return before < goal && after >= goal;
 }
 
+/** Duração padrão (em ms) da repetição do alarme sonoro e da exibição da notificação (5 segundos). */
+const ALARM_DURATION_MS = 5000;
+const ALARM_REPEAT_CYCLES = 5;
+const NOTIFY_DURATION_MS = 5000;
+
 let sharedAudioCtx = null;
+let activeAlarmNodes = [];
 
 function getAudioContext() {
   const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -2218,22 +2258,42 @@ function getAudioContext() {
 }
 
 /**
- * Toca um som de alarme usando Web Audio API.
+ * Interrompe imediatamente qualquer alarme sonoro em andamento.
+ */
+function stopAlarmSound() {
+  while (activeAlarmNodes.length) {
+    const node = activeAlarmNodes.pop();
+    try {
+      node.osc.stop();
+    } catch (_) {}
+    try {
+      node.osc.disconnect();
+      node.gain.disconnect();
+    } catch (_) {}
+  }
+}
+
+/**
+ * Toca um som de alarme usando Web Audio API, repetindo por 5 segundos como um alarme real.
  * Sem argumento toca o alarme configurado (respeitando "Silencioso").
  * Com `soundType` explícito é uma PRÉVIA: toca mesmo que o alarme salvo esteja silenciado,
  * para que o usuário possa ouvir antes de aplicar.
  * @param {string} [soundType] 'chime'|'bell'|'digital'|'marimba'|'harp'
+ * @param {{durationMs?: number}} [options]
  * @returns {boolean} true se algum som foi disparado
  */
-function playAlarmSound(soundType) {
+function playAlarmSound(soundType, options = {}) {
   const isPreview = soundType !== undefined;
   const type = isPreview ? soundType : resolveAlarmId(state.focus);
+  stopAlarmSound();
   if (type === 'off') return false;
 
   try {
     const ctx = getAudioContext();
     if (!ctx) return false;
     const now = ctx.currentTime + 0.02;
+    const durationMs = Math.max(1000, +(options.durationMs || ALARM_DURATION_MS));
+    const cycles = Math.max(1, Math.round(durationMs / 1000));
 
     const tone = (freq, start, dur, wave = 'sine', vol = 0.16) => {
       const osc = ctx.createOscillator();
@@ -2246,34 +2306,38 @@ function playAlarmSound(soundType) {
       gain.connect(ctx.destination);
       osc.start(now + start);
       osc.stop(now + start + dur + 0.02);
+      activeAlarmNodes.push({ osc, gain });
     };
 
-    if (type === 'bell') {
-      // Campainha Cristalina (harmônicos agudos)
-      [880, 1318.5, 1760].forEach((f, i) => {
-        tone(f, i * 0.18, 0.75, 'sine', 0.15);
-        tone(f * 2, i * 0.18, 0.35, 'triangle', 0.06);
-      });
-    } else if (type === 'digital') {
-      // Alarme Digital Clássico (bipes duplos)
-      [0, 0.12, 0.24, 0.55, 0.67, 0.79].forEach((t) => {
-        tone(1046.5, t, 0.08, 'square', 0.09);
-      });
-    } else if (type === 'marimba') {
-      // Marimba Zen
-      [392.0, 493.88, 587.33, 783.99].forEach((f, i) => {
-        tone(f, i * 0.11, 0.32, 'triangle', 0.2);
-      });
-    } else if (type === 'harp') {
-      // Harpa Celestial (arpejo ascendente suave)
-      [523.25, 587.33, 659.25, 783.99, 1046.5].forEach((f, i) => {
-        tone(f, i * 0.09, 0.65, 'sine', 0.13);
-      });
-    } else {
-      // 'chime' (Padrão: Sino Suave)
-      [523.25, 659.25, 783.99].forEach((f, i) => {
-        tone(f, i * 0.15, 0.5, 'sine', 0.15);
-      });
+    for (let c = 0; c < cycles; c++) {
+      const offset = c * 1.0;
+      if (type === 'bell') {
+        // Campainha Cristalina (harmônicos agudos)
+        [880, 1318.5, 1760].forEach((f, i) => {
+          tone(f, offset + i * 0.18, 0.55, 'sine', 0.15);
+          tone(f * 2, offset + i * 0.18, 0.28, 'triangle', 0.06);
+        });
+      } else if (type === 'digital') {
+        // Alarme Digital Clássico (bipes duplos)
+        [0, 0.12, 0.24, 0.52, 0.64, 0.76].forEach((t) => {
+          tone(1046.5, offset + t, 0.08, 'square', 0.09);
+        });
+      } else if (type === 'marimba') {
+        // Marimba Zen
+        [392.0, 493.88, 587.33, 783.99].forEach((f, i) => {
+          tone(f, offset + i * 0.11, 0.3, 'triangle', 0.2);
+        });
+      } else if (type === 'harp') {
+        // Harpa Celestial (arpejo ascendente suave)
+        [523.25, 587.33, 659.25, 783.99, 1046.5].forEach((f, i) => {
+          tone(f, offset + i * 0.09, 0.5, 'sine', 0.13);
+        });
+      } else {
+        // 'chime' (Padrão: Sino Suave)
+        [523.25, 659.25, 783.99].forEach((f, i) => {
+          tone(f, offset + i * 0.15, 0.45, 'sine', 0.15);
+        });
+      }
     }
     return true;
   } catch (_) {
@@ -2281,33 +2345,116 @@ function playAlarmSound(soundType) {
   }
 }
 
+let inAppToastTimer = null;
+
 /**
- * Envia uma notificação do sistema.
- * No app Desktop (Electron) usa a ponte nativa `window.rabituNative` (processo principal,
- * toast do Windows com AppUserModelID registrado). No navegador cai na Notification API da Web.
- * Nunca lança exceção: o resultado descreve o que aconteceu (útil para diagnóstico).
+ * Oculta o banner flutuante de notificação interno (#app-toast).
+ */
+function hideInAppNotification() {
+  clearTimeout(inAppToastTimer);
+  inAppToastTimer = null;
+  const el = $('app-toast');
+  if (!el) return;
+  try {
+    if (typeof el.hidePopover === 'function' && el.matches(':popover-open')) {
+      el.hidePopover();
+    }
+  } catch (_) {}
+  el.style.display = 'none';
+}
+
+/**
+ * Exibe o banner flutuante interno (#app-toast) por 5 segundos no Top-Layer do navegador.
+ * Funciona mesmo quando o navegador ou app está em tela cheia (F11 ou Fullscreen API),
+ * onde o Windows suprime toasts nativos por padrão via Assistência de Foco.
+ * @param {string} title
+ * @param {string} body
+ * @param {number} [durationMs=NOTIFY_DURATION_MS]
+ * @returns {boolean}
+ */
+function showInAppNotification(title, body, durationMs = NOTIFY_DURATION_MS) {
+  if (typeof document === 'undefined') return false;
+  const el = $('app-toast');
+  if (!el) return false;
+
+  clearTimeout(inAppToastTimer);
+  const host = document.fullscreenElement || document.body;
+  if (host && el.parentElement !== host) {
+    try {
+      host.appendChild(el);
+    } catch (_) {}
+  }
+
+  const dur = Math.max(1000, +durationMs || NOTIFY_DURATION_MS);
+  el.innerHTML = `
+    <div class="app-toast-head">
+      <strong class="app-toast-title">${esc(title || 'Rabitu')}</strong>
+      <button type="button" class="app-toast-close" id="app-toast-close" aria-label="Fechar notificação">✕</button>
+    </div>
+    <p class="app-toast-body">${esc(body || '')}</p>
+    <div class="app-toast-bar" style="animation-duration:${dur}ms"></div>
+  `;
+  el.style.display = 'block';
+  try {
+    if (typeof el.showPopover === 'function') {
+      if (el.matches(':popover-open')) el.hidePopover();
+      el.showPopover();
+    }
+  } catch (_) {}
+
+  const closeBtn = $('app-toast-close');
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      stopAlarmSound();
+      hideInAppNotification();
+    };
+  }
+
+  inAppToastTimer = setTimeout(() => {
+    hideInAppNotification();
+  }, dur);
+  return true;
+}
+
+/**
+ * Envia uma notificação do sistema com duração de 5 segundos (compatível com F11 Fullscreen).
+ * Sempre exibe o banner Top-Layer interno (#app-toast) por 5 segundos — garantindo visibilidade
+ * mesmo em modo tela cheia (F11) no navegador ou Electron — e também dispara o toast do Windows/Web.
  * @param {string} title Título da notificação
  * @param {string} body Corpo da mensagem
- * @returns {Promise<{channel: 'native'|'web'|'unsupported'|'denied', ok: boolean, error?: string}>}
+ * @param {number} [durationMs=NOTIFY_DURATION_MS] Duração em ms (padrão: 5000ms)
+ * @returns {Promise<{channel: 'native'|'web'|'in-app'|'unsupported'|'denied', ok: boolean, error?: string}>}
  */
-async function sendWindowsNotification(title, body) {
+async function sendWindowsNotification(title, body, durationMs = NOTIFY_DURATION_MS) {
+  const shownInApp = showInAppNotification(title, body, durationMs);
   try {
     if (window.rabituNative && typeof window.rabituNative.notify === 'function') {
-      const r = await window.rabituNative.notify(title, body);
-      return { channel: 'native', ok: !!(r && r.ok), error: r && r.error };
+      const r = await window.rabituNative.notify(title, body, durationMs);
+      return { channel: 'native', ok: !!(r && r.ok) || shownInApp, error: r && r.error };
     }
     if (typeof Notification === 'undefined') {
-      return { channel: 'unsupported', ok: false, error: 'Notification API indisponível' };
+      return shownInApp
+        ? { channel: 'in-app', ok: true }
+        : { channel: 'unsupported', ok: false, error: 'Notification API indisponível' };
     }
     let perm = Notification.permission;
     if (perm === 'default') perm = await Notification.requestPermission();
     if (perm !== 'granted') {
-      return { channel: 'denied', ok: false, error: 'Permissão de notificação negada' };
+      return shownInApp
+        ? { channel: 'in-app', ok: true }
+        : { channel: 'denied', ok: false, error: 'Permissão de notificação negada' };
     }
-    new Notification(title, { body });
+    const n = new Notification(title, { body });
+    setTimeout(() => {
+      try {
+        n.close();
+      } catch (_) {}
+    }, Math.max(1000, +durationMs || NOTIFY_DURATION_MS));
     return { channel: 'web', ok: true };
   } catch (err) {
-    return { channel: 'unsupported', ok: false, error: err && err.message ? err.message : String(err) };
+    return shownInApp
+      ? { channel: 'in-app', ok: true }
+      : { channel: 'unsupported', ok: false, error: err && err.message ? err.message : String(err) };
   }
 }
 
@@ -3111,6 +3258,7 @@ function openClockConfigModal() {
 }
 
 function saveClockConfigModal() {
+  stopAlarmSound();
   state.focus.blockMin = Math.max(15, Math.min(120, +$('cblock').value || 60));
   state.focus.breakMin = Math.max(1, Math.min(60, +$('cbreak').value || 5));
   const chosenSound = $('csound').value || 'chime';
@@ -3132,6 +3280,7 @@ function setNotifyStatus(text, kind) {
 function previewSelectedAlarm() {
   const id = $('csound').value;
   if (id === 'off') {
+    stopAlarmSound();
     setNotifyStatus('“Silencioso” selecionado: nenhum som será tocado ao fim de cada etapa.', '');
     return;
   }
@@ -3312,26 +3461,36 @@ function initClockTab() {
   if (gdlg) {
     $('gok').onclick = saveGoalModal;
     $('gcancel').onclick = () => gdlg.close();
-    $('ggoal').onkeydown = (e) => {
-      if (e.key === 'Enter') saveGoalModal();
-    };
-    gdlg.addEventListener('click', (e) => {
-      if (e.target === gdlg) gdlg.close();
+    ['ggoal', 'gtoday'].forEach((id) => {
+      const el = $(id);
+      if (el) {
+        el.onkeydown = (e) => {
+          if (e.key === 'Enter') saveGoalModal();
+        };
+      }
     });
   }
 
   const cdlg = $('cdlg');
   if (cdlg) {
     $('cok').onclick = saveClockConfigModal;
-    $('ccancel').onclick = () => cdlg.close();
+    $('ccancel').onclick = () => {
+      stopAlarmSound();
+      cdlg.close();
+    };
+    ['cblock', 'cbreak'].forEach((id) => {
+      const el = $(id);
+      if (el) {
+        el.onkeydown = (e) => {
+          if (e.key === 'Enter') saveClockConfigModal();
+        };
+      }
+    });
     $('csound-test').onclick = previewSelectedAlarm;
     // Ao trocar a opção, já toca a prévia (ainda sem aplicar).
     $('csound').onchange = previewSelectedAlarm;
     const nbtn = $('cnotify-test');
     if (nbtn) nbtn.onclick = testNotification;
-    cdlg.addEventListener('click', (e) => {
-      if (e.target === cdlg) cdlg.close();
-    });
   }
 
   const tdlg = $('tdlg');
@@ -3339,9 +3498,14 @@ function initClockTab() {
     $('tok').onclick = saveTimerModal;
     $('tcancel').onclick = () => tdlg.close();
     $('tdel').onclick = deleteTimerFromModal;
-    $('tname').onkeydown = (e) => {
-      if (e.key === 'Enter') saveTimerModal();
-    };
+    ['tname', 'thours', 'tmins', 'tsecs'].forEach((id) => {
+      const el = $(id);
+      if (el) {
+        el.onkeydown = (e) => {
+          if (e.key === 'Enter') saveTimerModal();
+        };
+      }
+    });
     const presets = $('tpresets');
     if (presets) {
       presets.onclick = (e) => {
@@ -3356,9 +3520,6 @@ function initClockTab() {
         }
       };
     }
-    tdlg.addEventListener('click', (e) => {
-      if (e.target === tdlg) tdlg.close();
-    });
   }
 }
 
@@ -3423,12 +3584,25 @@ function runHealthCheck(options = {}) {
     );
   });
 
-  // 3. Regras do Tanque de Lazer (0,5 crédito por hábito = 10 min)
-  test('Tanque de Lazer: constantes de conversão de créditos', () => {
+  // 3. Regras do Tanque de Lazer e Double-Check do Banco de Horas
+  test('Banco de Horas & Tanque de Lazer: créditos e double-check de atividades', () => {
     assert(MINS === 20, '1 crédito deve equivaler a 20 minutos');
     assert(PER === 0.5, 'Cada 0,5h de estudo deve gerar 1 crédito');
     assert(HABCREDIT === 0.5, 'Cada hábito concluído deve valer 0,5 crédito');
     assert(HABMIN === 10, 'Cada hábito concluído deve somar 10 minutos de lazer');
+
+    const dummyItem = { hours: 1.5, done: [], half: [] };
+    const c1 = advanceBankSquareState(dummyItem, 2);
+    assert(c1.state === 'half' && c1.hoursDelta === 0, '1º clique deve ser apenas visual (half) e somar 0h');
+    assert(dummyItem.half.includes(2) && !dummyItem.done.includes(2), '1º clique deve registrar em half e não em done');
+
+    const c2 = advanceBankSquareState(dummyItem, 2);
+    assert(c2.state === 'done' && c2.hoursDelta === 1.5, '2º clique (double-check) deve confirmar e somar 1.5h');
+    assert(!dummyItem.half.includes(2) && dummyItem.done.includes(2), '2º clique deve mover de half para done');
+
+    const c3 = advanceBankSquareState(dummyItem, 2);
+    assert(c3.state === 'empty' && c3.hoursDelta === -1.5, '3º clique deve desmarcar e estornar -1.5h');
+    assert(!dummyItem.half.includes(2) && !dummyItem.done.includes(2), '3º clique deve limpar half e done');
   });
 
   // 4. Cálculo de Ofensivas (Streaks) de Hábitos
@@ -3496,8 +3670,11 @@ function runHealthCheck(options = {}) {
     assert(formatCountdown(3661) === '01:01:01', '3661s deve formatar como 01:01:01');
   });
 
-  // 6b. Relógio de Foco: alarme, notificações de fase e detecção de meta batida
-  test('Relógio de Foco: alarme escolhido, notificações de fase e meta batida', () => {
+  // 6b. Relógio de Foco: alarme de 5s, notificações de 5s e detecção de meta batida
+  test('Relógio de Foco: alarme repetitivo de 5s, notificações de 5s e meta batida', () => {
+    assert(ALARM_DURATION_MS === 5000, 'Duração do alarme sonoro deve ser 5000ms (5s)');
+    assert(ALARM_REPEAT_CYCLES === 5, 'Alarme deve repetir por 5 ciclos em 5 segundos');
+    assert(NOTIFY_DURATION_MS === 5000, 'Duração da notificação deve ser 5000ms (5s)');
     assert(resolveAlarmId({ sound: true, soundType: 'bell' }) === 'bell', 'Deve respeitar o som escolhido');
     assert(resolveAlarmId({ sound: false, soundType: 'bell' }) === 'off', 'sound=false silencia o alarme');
     assert(resolveAlarmId({ soundType: 'off' }) === 'off', 'soundType=off silencia o alarme');
@@ -3539,7 +3716,7 @@ function runHealthCheck(options = {}) {
     assert(tn.title.includes('Temporizador') && tn.body.includes('CALC II') && tn.body.includes('00:30:00'), 'Notificação de temporizador deve incluir nome e duração');
   });
 
-  // 7. Integridade do Estado e DOM (quando no navegador)
+  // 7. Integridade do Estado, DOM e Estabilidade dos Modais (quando no navegador)
   if (checkDOM) {
     test('Integridade do DOM, Identidade "Rabitu" e Estado da Aplicação', () => {
       const requiredIds = [
@@ -3552,6 +3729,7 @@ function runHealthCheck(options = {}) {
         'dash',
         'bank',
         'clock',
+        'app-toast',
         'dlg',
         'ddlg',
         'fdlg',
@@ -3575,6 +3753,32 @@ function runHealthCheck(options = {}) {
       assert(Array.isArray(state.bank), 'state.bank deve ser um Array');
       assert(state.focus && typeof state.focus === 'object', 'state.focus deve existir');
       assert(Array.isArray(state.focus.timers), 'state.focus.timers deve ser um Array');
+    });
+
+    test('Estabilidade dos Modais (<dialog>): não fecham ao clicar fora dos campos editáveis', () => {
+      const dialogIds = ['dlg', 'ddlg', 'fdlg', 'bdlg', 'rdlg', 'sdlg', 'qdlg', 'gdlg', 'cdlg', 'tdlg'];
+      for (const id of dialogIds) {
+        const dlg = $(id);
+        assert(dlg !== null, `Modal #${id} não encontrado`);
+        const wasOpen = dlg.open;
+        if (!wasOpen) dlg.showModal();
+        try {
+          // Simula clique diretamente na superfície do <dialog> (fora dos inputs) e em rótulos internos
+          dlg.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+          dlg.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+          dlg.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          const label = dlg.querySelector('label, strong, p');
+          if (label) {
+            label.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          }
+          assert(
+            dlg.open === true,
+            `Modal #${id} fechou sozinho ao clicar fora dos campos editáveis`
+          );
+        } finally {
+          if (!wasOpen && dlg.open) dlg.close();
+        }
+      }
     });
   }
 

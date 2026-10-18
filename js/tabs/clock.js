@@ -286,7 +286,13 @@ export function justReachedGoal(before, after, goal) {
   return before < goal && after >= goal;
 }
 
+/** Duração padrão (em ms) da repetição do alarme sonoro e da exibição da notificação (5 segundos). */
+export const ALARM_DURATION_MS = 5000;
+export const ALARM_REPEAT_CYCLES = 5;
+export const NOTIFY_DURATION_MS = 5000;
+
 let sharedAudioCtx = null;
+let activeAlarmNodes = [];
 
 function getAudioContext() {
   const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -297,22 +303,42 @@ function getAudioContext() {
 }
 
 /**
- * Toca um som de alarme usando Web Audio API.
+ * Interrompe imediatamente qualquer alarme sonoro em andamento.
+ */
+export function stopAlarmSound() {
+  while (activeAlarmNodes.length) {
+    const node = activeAlarmNodes.pop();
+    try {
+      node.osc.stop();
+    } catch (_) {}
+    try {
+      node.osc.disconnect();
+      node.gain.disconnect();
+    } catch (_) {}
+  }
+}
+
+/**
+ * Toca um som de alarme usando Web Audio API, repetindo por 5 segundos como um alarme real.
  * Sem argumento toca o alarme configurado (respeitando "Silencioso").
  * Com `soundType` explícito é uma PRÉVIA: toca mesmo que o alarme salvo esteja silenciado,
  * para que o usuário possa ouvir antes de aplicar.
  * @param {string} [soundType] 'chime'|'bell'|'digital'|'marimba'|'harp'
+ * @param {{durationMs?: number}} [options]
  * @returns {boolean} true se algum som foi disparado
  */
-export function playAlarmSound(soundType) {
+export function playAlarmSound(soundType, options = {}) {
   const isPreview = soundType !== undefined;
   const type = isPreview ? soundType : resolveAlarmId(state.focus);
+  stopAlarmSound();
   if (type === 'off') return false;
 
   try {
     const ctx = getAudioContext();
     if (!ctx) return false;
     const now = ctx.currentTime + 0.02;
+    const durationMs = Math.max(1000, +(options.durationMs || ALARM_DURATION_MS));
+    const cycles = Math.max(1, Math.round(durationMs / 1000));
 
     const tone = (freq, start, dur, wave = 'sine', vol = 0.16) => {
       const osc = ctx.createOscillator();
@@ -325,34 +351,38 @@ export function playAlarmSound(soundType) {
       gain.connect(ctx.destination);
       osc.start(now + start);
       osc.stop(now + start + dur + 0.02);
+      activeAlarmNodes.push({ osc, gain });
     };
 
-    if (type === 'bell') {
-      // Campainha Cristalina (harmônicos agudos)
-      [880, 1318.5, 1760].forEach((f, i) => {
-        tone(f, i * 0.18, 0.75, 'sine', 0.15);
-        tone(f * 2, i * 0.18, 0.35, 'triangle', 0.06);
-      });
-    } else if (type === 'digital') {
-      // Alarme Digital Clássico (bipes duplos)
-      [0, 0.12, 0.24, 0.55, 0.67, 0.79].forEach((t) => {
-        tone(1046.5, t, 0.08, 'square', 0.09);
-      });
-    } else if (type === 'marimba') {
-      // Marimba Zen
-      [392.0, 493.88, 587.33, 783.99].forEach((f, i) => {
-        tone(f, i * 0.11, 0.32, 'triangle', 0.2);
-      });
-    } else if (type === 'harp') {
-      // Harpa Celestial (arpejo ascendente suave)
-      [523.25, 587.33, 659.25, 783.99, 1046.5].forEach((f, i) => {
-        tone(f, i * 0.09, 0.65, 'sine', 0.13);
-      });
-    } else {
-      // 'chime' (Padrão: Sino Suave)
-      [523.25, 659.25, 783.99].forEach((f, i) => {
-        tone(f, i * 0.15, 0.5, 'sine', 0.15);
-      });
+    for (let c = 0; c < cycles; c++) {
+      const offset = c * 1.0;
+      if (type === 'bell') {
+        // Campainha Cristalina (harmônicos agudos)
+        [880, 1318.5, 1760].forEach((f, i) => {
+          tone(f, offset + i * 0.18, 0.55, 'sine', 0.15);
+          tone(f * 2, offset + i * 0.18, 0.28, 'triangle', 0.06);
+        });
+      } else if (type === 'digital') {
+        // Alarme Digital Clássico (bipes duplos)
+        [0, 0.12, 0.24, 0.52, 0.64, 0.76].forEach((t) => {
+          tone(1046.5, offset + t, 0.08, 'square', 0.09);
+        });
+      } else if (type === 'marimba') {
+        // Marimba Zen
+        [392.0, 493.88, 587.33, 783.99].forEach((f, i) => {
+          tone(f, offset + i * 0.11, 0.3, 'triangle', 0.2);
+        });
+      } else if (type === 'harp') {
+        // Harpa Celestial (arpejo ascendente suave)
+        [523.25, 587.33, 659.25, 783.99, 1046.5].forEach((f, i) => {
+          tone(f, offset + i * 0.09, 0.5, 'sine', 0.13);
+        });
+      } else {
+        // 'chime' (Padrão: Sino Suave)
+        [523.25, 659.25, 783.99].forEach((f, i) => {
+          tone(f, offset + i * 0.15, 0.45, 'sine', 0.15);
+        });
+      }
     }
     return true;
   } catch (_) {
@@ -360,33 +390,116 @@ export function playAlarmSound(soundType) {
   }
 }
 
+let inAppToastTimer = null;
+
 /**
- * Envia uma notificação do sistema.
- * No app Desktop (Electron) usa a ponte nativa `window.rabituNative` (processo principal,
- * toast do Windows com AppUserModelID registrado). No navegador cai na Notification API da Web.
- * Nunca lança exceção: o resultado descreve o que aconteceu (útil para diagnóstico).
+ * Oculta o banner flutuante de notificação interno (#app-toast).
+ */
+export function hideInAppNotification() {
+  clearTimeout(inAppToastTimer);
+  inAppToastTimer = null;
+  const el = $('app-toast');
+  if (!el) return;
+  try {
+    if (typeof el.hidePopover === 'function' && el.matches(':popover-open')) {
+      el.hidePopover();
+    }
+  } catch (_) {}
+  el.style.display = 'none';
+}
+
+/**
+ * Exibe o banner flutuante interno (#app-toast) por 5 segundos no Top-Layer do navegador.
+ * Funciona mesmo quando o navegador ou app está em tela cheia (F11 ou Fullscreen API),
+ * onde o Windows suprime toasts nativos por padrão via Assistência de Foco.
+ * @param {string} title
+ * @param {string} body
+ * @param {number} [durationMs=NOTIFY_DURATION_MS]
+ * @returns {boolean}
+ */
+export function showInAppNotification(title, body, durationMs = NOTIFY_DURATION_MS) {
+  if (typeof document === 'undefined') return false;
+  const el = $('app-toast');
+  if (!el) return false;
+
+  clearTimeout(inAppToastTimer);
+  const host = document.fullscreenElement || document.body;
+  if (host && el.parentElement !== host) {
+    try {
+      host.appendChild(el);
+    } catch (_) {}
+  }
+
+  const dur = Math.max(1000, +durationMs || NOTIFY_DURATION_MS);
+  el.innerHTML = `
+    <div class="app-toast-head">
+      <strong class="app-toast-title">${esc(title || 'Rabitu')}</strong>
+      <button type="button" class="app-toast-close" id="app-toast-close" aria-label="Fechar notificação">✕</button>
+    </div>
+    <p class="app-toast-body">${esc(body || '')}</p>
+    <div class="app-toast-bar" style="animation-duration:${dur}ms"></div>
+  `;
+  el.style.display = 'block';
+  try {
+    if (typeof el.showPopover === 'function') {
+      if (el.matches(':popover-open')) el.hidePopover();
+      el.showPopover();
+    }
+  } catch (_) {}
+
+  const closeBtn = $('app-toast-close');
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      stopAlarmSound();
+      hideInAppNotification();
+    };
+  }
+
+  inAppToastTimer = setTimeout(() => {
+    hideInAppNotification();
+  }, dur);
+  return true;
+}
+
+/**
+ * Envia uma notificação do sistema com duração de 5 segundos (compatível com F11 Fullscreen).
+ * Sempre exibe o banner Top-Layer interno (#app-toast) por 5 segundos — garantindo visibilidade
+ * mesmo em modo tela cheia (F11) no navegador ou Electron — e também dispara o toast do Windows/Web.
  * @param {string} title Título da notificação
  * @param {string} body Corpo da mensagem
- * @returns {Promise<{channel: 'native'|'web'|'unsupported'|'denied', ok: boolean, error?: string}>}
+ * @param {number} [durationMs=NOTIFY_DURATION_MS] Duração em ms (padrão: 5000ms)
+ * @returns {Promise<{channel: 'native'|'web'|'in-app'|'unsupported'|'denied', ok: boolean, error?: string}>}
  */
-export async function sendWindowsNotification(title, body) {
+export async function sendWindowsNotification(title, body, durationMs = NOTIFY_DURATION_MS) {
+  const shownInApp = showInAppNotification(title, body, durationMs);
   try {
     if (window.rabituNative && typeof window.rabituNative.notify === 'function') {
-      const r = await window.rabituNative.notify(title, body);
-      return { channel: 'native', ok: !!(r && r.ok), error: r && r.error };
+      const r = await window.rabituNative.notify(title, body, durationMs);
+      return { channel: 'native', ok: !!(r && r.ok) || shownInApp, error: r && r.error };
     }
     if (typeof Notification === 'undefined') {
-      return { channel: 'unsupported', ok: false, error: 'Notification API indisponível' };
+      return shownInApp
+        ? { channel: 'in-app', ok: true }
+        : { channel: 'unsupported', ok: false, error: 'Notification API indisponível' };
     }
     let perm = Notification.permission;
     if (perm === 'default') perm = await Notification.requestPermission();
     if (perm !== 'granted') {
-      return { channel: 'denied', ok: false, error: 'Permissão de notificação negada' };
+      return shownInApp
+        ? { channel: 'in-app', ok: true }
+        : { channel: 'denied', ok: false, error: 'Permissão de notificação negada' };
     }
-    new Notification(title, { body });
+    const n = new Notification(title, { body });
+    setTimeout(() => {
+      try {
+        n.close();
+      } catch (_) {}
+    }, Math.max(1000, +durationMs || NOTIFY_DURATION_MS));
     return { channel: 'web', ok: true };
   } catch (err) {
-    return { channel: 'unsupported', ok: false, error: err && err.message ? err.message : String(err) };
+    return shownInApp
+      ? { channel: 'in-app', ok: true }
+      : { channel: 'unsupported', ok: false, error: err && err.message ? err.message : String(err) };
   }
 }
 
@@ -1190,6 +1303,7 @@ function openClockConfigModal() {
 }
 
 function saveClockConfigModal() {
+  stopAlarmSound();
   state.focus.blockMin = Math.max(15, Math.min(120, +$('cblock').value || 60));
   state.focus.breakMin = Math.max(1, Math.min(60, +$('cbreak').value || 5));
   const chosenSound = $('csound').value || 'chime';
@@ -1211,6 +1325,7 @@ function setNotifyStatus(text, kind) {
 function previewSelectedAlarm() {
   const id = $('csound').value;
   if (id === 'off') {
+    stopAlarmSound();
     setNotifyStatus('“Silencioso” selecionado: nenhum som será tocado ao fim de cada etapa.', '');
     return;
   }
@@ -1391,26 +1506,36 @@ export function initClockTab() {
   if (gdlg) {
     $('gok').onclick = saveGoalModal;
     $('gcancel').onclick = () => gdlg.close();
-    $('ggoal').onkeydown = (e) => {
-      if (e.key === 'Enter') saveGoalModal();
-    };
-    gdlg.addEventListener('click', (e) => {
-      if (e.target === gdlg) gdlg.close();
+    ['ggoal', 'gtoday'].forEach((id) => {
+      const el = $(id);
+      if (el) {
+        el.onkeydown = (e) => {
+          if (e.key === 'Enter') saveGoalModal();
+        };
+      }
     });
   }
 
   const cdlg = $('cdlg');
   if (cdlg) {
     $('cok').onclick = saveClockConfigModal;
-    $('ccancel').onclick = () => cdlg.close();
+    $('ccancel').onclick = () => {
+      stopAlarmSound();
+      cdlg.close();
+    };
+    ['cblock', 'cbreak'].forEach((id) => {
+      const el = $(id);
+      if (el) {
+        el.onkeydown = (e) => {
+          if (e.key === 'Enter') saveClockConfigModal();
+        };
+      }
+    });
     $('csound-test').onclick = previewSelectedAlarm;
     // Ao trocar a opção, já toca a prévia (ainda sem aplicar).
     $('csound').onchange = previewSelectedAlarm;
     const nbtn = $('cnotify-test');
     if (nbtn) nbtn.onclick = testNotification;
-    cdlg.addEventListener('click', (e) => {
-      if (e.target === cdlg) cdlg.close();
-    });
   }
 
   const tdlg = $('tdlg');
@@ -1418,9 +1543,14 @@ export function initClockTab() {
     $('tok').onclick = saveTimerModal;
     $('tcancel').onclick = () => tdlg.close();
     $('tdel').onclick = deleteTimerFromModal;
-    $('tname').onkeydown = (e) => {
-      if (e.key === 'Enter') saveTimerModal();
-    };
+    ['tname', 'thours', 'tmins', 'tsecs'].forEach((id) => {
+      const el = $(id);
+      if (el) {
+        el.onkeydown = (e) => {
+          if (e.key === 'Enter') saveTimerModal();
+        };
+      }
+    });
     const presets = $('tpresets');
     if (presets) {
       presets.onclick = (e) => {
@@ -1435,8 +1565,5 @@ export function initClockTab() {
         }
       };
     }
-    tdlg.addEventListener('click', (e) => {
-      if (e.target === tdlg) tdlg.close();
-    });
   }
 }

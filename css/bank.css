@@ -97,6 +97,16 @@
   border-color: var(--green);
 }
 
+.sq.half {
+  background: rgba(47, 200, 107, 0.24);
+  border-color: #15803d;
+}
+
+:root[data-theme="dark"] .sq.half {
+  background: rgba(47, 200, 107, 0.22);
+  border-color: #16a34a;
+}
+
 .sq.on {
   background: var(--green);
   border-color: var(--green);

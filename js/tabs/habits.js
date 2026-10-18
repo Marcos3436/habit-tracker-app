@@ -406,15 +406,9 @@ export function initHabitsTab() {
   $('ppm').onclick = () => shiftDotsMonth(-1);
   $('pnm').onclick = () => shiftDotsMonth(1);
   $('pclose').onclick = () => ddlg.close();
-  ddlg.addEventListener('click', (e) => {
-    if (e.target === ddlg) ddlg.close();
-  });
 
   // Modal de Ofensiva (#fdlg)
   $('fclose').onclick = () => fdlg.close();
-  fdlg.addEventListener('click', (e) => {
-    if (e.target === fdlg) fdlg.close();
-  });
 
   // Modal de Criar / Editar Hábito (#dlg)
   $('new').onclick = () => openHabitModal();
