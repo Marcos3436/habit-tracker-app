@@ -1,5 +1,5 @@
 {
-  "version": 15,
+  "version": 16,
   "files": [
     "index.html",
     "manifest.json",
@@ -32,7 +32,7 @@
     "css/habits.css": "d3d5efedd240893f8a63d3a485fb530c49dd69de147a623d16a061d7d7e247ee",
     "css/dashboard.css": "cd02dc8f3bbb1ede94977d4d1ba62772ddb1bedb21e5e8e33bba9b539391d782",
     "css/bank.css": "dd928f34c6ca21b5776070b31e25cb4ac5b205243a8f2528f2f4d31df7176bcd",
-    "css/clock.css": "5a8bc8a2fe7acce7d1b036c5829e9a850888af0fc9e1a1c7584127b9e603352c",
+    "css/clock.css": "6c6832cb7640b64e2064e14118fdfb046dd0dcd901ed33e6fc9023e944174077",
     "js/main.js": "ba681c1781b8d795a6e30d2cb5f24a96f4ce5aafa6a79a9ef96eca4d0e2f136f",
     "js/file-fallback.js": "f63d62f92694c98a8e39fc4ba52a9f1d345298ced83c48f48a0664f69fe3ef35",
     "js/core/dates.js": "aea3ab79a98791ea2e0ef049f51ca9e6bf91e04b99922ba699fd9d9f3bec3a85",

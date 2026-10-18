@@ -380,28 +380,23 @@
 .timer-center {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
-  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .timer-digits {
-  font: 700 34px/1 var(--font-display);
+  font: 700 38px/1 var(--font-display);
   letter-spacing: -0.5px;
   color: var(--text);
   font-variant-numeric: tabular-nums;
-  transform: translateY(2px);
 }
 
 .timer-sub {
-  position: absolute;
-  bottom: 40px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--mute);
-  margin: 0;
+  margin-top: 6px;
 }
 
 .session-steps-dots {
@@ -536,7 +531,6 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  transform: translateY(2px);
 }
 
 .goal-ring-center span {
@@ -545,9 +539,9 @@
 }
 
 .goal-ring-center strong {
-  font: 700 36px/1.05 var(--font-display);
+  font: 700 40px/1.05 var(--font-display);
   color: var(--text);
-  margin: 3px 0;
+  margin: 4px 0;
 }
 
 .daily-completed-text {
@@ -851,32 +845,29 @@
 .tcard-center {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
 }
 
 .tcard-digits {
-  font: 700 29px/1 var(--font-display);
+  font: 700 32px/1 var(--font-display);
   letter-spacing: -0.5px;
   color: var(--text);
   font-variant-numeric: tabular-nums;
-  transform: translateY(2px);
 }
 
 .timer-card.is-expanded .tcard-digits {
-  font-size: 38px;
+  font-size: 42px;
 }
 
 .tcard-sub {
-  position: absolute;
-  bottom: 36px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--mute);
-  margin: 0;
+  margin-top: 6px;
+  min-height: 16px;
 }
 
 .tcard-sub.done {
