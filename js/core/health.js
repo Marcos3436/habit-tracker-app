@@ -9,6 +9,8 @@ import { dim, dow, fmtD, keyOf, nWeeks, parseKey } from './dates.js';
 import { $, DEFAULT_TIP_DELAY, esc } from './dom.js';
 import { HABCREDIT, HABMIN, MINS, PER, state, stats } from './state.js';
 import { advanceBankSquareState } from '../tabs/bank.js';
+import { calcDashboardSummary } from '../tabs/dashboard.js';
+import { buildMonthlyReportMatrix } from '../tabs/reports.js';
 import {
   ALARM_DURATION_MS,
   ALARM_REPEAT_CYCLES,
@@ -212,6 +214,40 @@ export function runHealthCheck(options = {}) {
 
     const tn = buildTimerNotification('CALC II', 1800);
     assert(tn.title.includes('Temporizador') && tn.body.includes('CALC II') && tn.body.includes('00:30:00'), 'Notificação de temporizador deve incluir nome e duração');
+  });
+
+  // 6d. Dashboard & Relatórios: Porcentagem Geral, Mais Feitos, Mais Falhos e Matriz Mensal Visual
+  test('Dashboard & Relatórios: porcentagem de concluídos, rankings e matriz mensal em barras', () => {
+    const d0 = 20727; // 2026-10-01
+    const sampleHabits = [
+      {
+        id: 'h1',
+        name: 'Leitura',
+        dates: [keyOf(d0), keyOf(d0 + 1), keyOf(d0 + 2), keyOf(d0 + 3)],
+        fails: [],
+      },
+      {
+        id: 'h2',
+        name: 'Corrida',
+        dates: [keyOf(d0)],
+        fails: [keyOf(d0 + 1), keyOf(d0 + 2)],
+      },
+    ];
+    const dash = calcDashboardSummary(sampleHabits, d0, d0 + 3); // 4 dias avaliados
+    assert(dash.totalPossible === 8, `Total possível esperado 8, obtido ${dash.totalPossible}`);
+    assert(dash.totalDone === 5, `Total concluído esperado 5, obtido ${dash.totalDone}`);
+    assert(dash.overallPct === 63, `Porcentagem geral esperada 63%, obtida ${dash.overallPct}%`);
+    assert(dash.mostDone[0].name === 'Leitura' && dash.mostDone[0].pct === 100, 'Hábito mais feito deve ser Leitura (100%)');
+    assert(dash.mostFailed[0].name === 'Corrida' && dash.mostFailed[0].fails === 2, 'Hábito mais falho deve ser Corrida (2 falhas)');
+
+    const mx = buildMonthlyReportMatrix(sampleHabits, 2026, 9, d0 + 3); // Outubro/2026 (m=9)
+    assert(mx.totalDays === 31, 'Outubro deve ter 31 colunas na matriz mensal');
+    const r1 = mx.rows[0].cells;
+    assert(r1[0].on && !r1[0].pl && r1[0].nr, 'Dia 1 de sequência deve iniciar barra (on + nr)');
+    assert(r1[1].on && r1[1].pl && r1[1].nr, 'Dia 2 de sequência deve conectar ambos os lados (on + pl + nr)');
+    assert(r1[3].on && r1[3].pl && !r1[3].nr, 'Dia 4 de sequência deve fechar barra (on + pl)');
+    const r2 = mx.rows[1].cells;
+    assert(r2[1].x === true && r2[2].x === true, 'Dias com falha devem marcar x=true na matriz mensal');
   });
 
   // 7. Integridade do Estado, DOM e Estabilidade dos Modais (quando no navegador)

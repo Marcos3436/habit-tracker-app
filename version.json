@@ -1,5 +1,5 @@
 {
-  "version": 21,
+  "version": 22,
   "files": [
     "index.html",
     "manifest.json",
@@ -32,22 +32,22 @@
     "assets/icon-v2.png": "024e20b02b43a4236499b556d94708eee61e599628e61fb509ee9ddbb08c556d",
     "css/main.css": "37c689098697b173fdaf3630faae29a861149090aa62c4d5e0a1ef275afe5f61",
     "css/base.css": "f9730a4500a539db98b048d93ef121c306a155afbe4b7c57365ad738178c2ba5",
-    "css/components.css": "f8eb2f81914a9befbab9a677d0bd5551e897bef33a7ec35186fe6f41ed9dca7e",
+    "css/components.css": "0d9d25e43b49cd9ff53ea025c74eabf74e7a7483c564a7667096b18a09d2b4eb",
     "css/habits.css": "d3d5efedd240893f8a63d3a485fb530c49dd69de147a623d16a061d7d7e247ee",
-    "css/dashboard.css": "cd02dc8f3bbb1ede94977d4d1ba62772ddb1bedb21e5e8e33bba9b539391d782",
+    "css/dashboard.css": "24a4da03c5059646989f8074a50d4e00f9c8980fea31bc648040262354e48a67",
     "css/bank.css": "dd928f34c6ca21b5776070b31e25cb4ac5b205243a8f2528f2f4d31df7176bcd",
     "css/clock.css": "6c6832cb7640b64e2064e14118fdfb046dd0dcd901ed33e6fc9023e944174077",
     "js/main.js": "ba681c1781b8d795a6e30d2cb5f24a96f4ce5aafa6a79a9ef96eca4d0e2f136f",
-    "js/file-fallback.js": "f63d62f92694c98a8e39fc4ba52a9f1d345298ced83c48f48a0664f69fe3ef35",
+    "js/file-fallback.js": "6513e8946459c1423f157259a51c5a7e9dab1d36e589e281d51444c189d430a7",
     "js/core/dates.js": "aea3ab79a98791ea2e0ef049f51ca9e6bf91e04b99922ba699fd9d9f3bec3a85",
     "js/core/dom.js": "fa1524ac5e8e92d3837403ce420f960f30d644b9305b3020aaf0dcaf90133c2c",
     "js/core/state.js": "50eade566a5e0450c4674e55195e3970bb7f2392c3f76141f98218e21d16695f",
     "js/core/supabase.js": "0368f2c4e73c0a0c240c851c316d351200d872be105ba50d5c0dc7b233b68ba3",
-    "js/core/health.js": "3ba641a327a5e80bbca4cc2d86c23d944572b890343cf105e41a6e12bc220eae",
+    "js/core/health.js": "defce77aa0d03e09e4949b4cb492a0193a188e22426f02c6082d58d90290513a",
     "js/tabs/habits.js": "75ea012a3c14e7226d20517a61ce61ef1edee220ca864f042b31458a809c0eb1",
-    "js/tabs/dashboard.js": "38a69dccfd7251503b625c26f643fcee52280cff65b706ba82cda68032f61fa2",
+    "js/tabs/dashboard.js": "06d4b055ac72bdcfe3fad0eb5738a70534599f4f40ca333cdcbeea3077c73763",
     "js/tabs/bank.js": "c8424d8dc7d8e6ec43e0d7c16ec096a2330731e0f107c7f03889fd780d3b70eb",
     "js/tabs/clock.js": "fca957bd43e5154e5391ddba8db183ac4f7d41a749e0d304ada95636cdcf996d",
-    "js/tabs/reports.js": "4c3450c4fb4284b91553072f511cf7125d307131023208025f0a8fbbf0218ec5"
+    "js/tabs/reports.js": "c59ea45418c01e77c86ff4a39066a338b2795aee34d05f4ab67ecf79fa9d5e72"
   }
 }
