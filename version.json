@@ -1,8 +1,9 @@
 {
-  "version": 16,
+  "version": 18,
   "files": [
     "index.html",
     "manifest.json",
+    "assets/icon.png",
     "css/main.css",
     "css/base.css",
     "css/components.css",
@@ -24,11 +25,12 @@
     "js/tabs/reports.js"
   ],
   "hashes": {
-    "index.html": "f4301e314df2a4e956df5ab310f8427f8fc0ae1b9634edbb3ea67802ef380262",
-    "manifest.json": "8dc6621504fc60c156fb52ea90e71ff212712bd6b17177d7f8464299bb27cdc9",
+    "index.html": "79209a5ec3098142bef75b47a6770e3bd7574a47153fe9c5e561ee597c6556d3",
+    "manifest.json": "9adfd6eff24f90157c47263520e803ca3f67d2aaf321756d90681c51b2a1091b",
+    "assets/icon.png": "92d9b1f79a2cf3e38511dab67850906ec99b83276f6c6af0fc0d6e32f27b01e0",
     "css/main.css": "37c689098697b173fdaf3630faae29a861149090aa62c4d5e0a1ef275afe5f61",
     "css/base.css": "f9730a4500a539db98b048d93ef121c306a155afbe4b7c57365ad738178c2ba5",
-    "css/components.css": "eb1a092a27425c0e259ef4bcc50cabb8e24ab34724bf18962464bef5522ac3fa",
+    "css/components.css": "c9195490919a11e7b93c6347018c4f38b5575b41b1c81826fc23f34783e63a32",
     "css/habits.css": "d3d5efedd240893f8a63d3a485fb530c49dd69de147a623d16a061d7d7e247ee",
     "css/dashboard.css": "cd02dc8f3bbb1ede94977d4d1ba62772ddb1bedb21e5e8e33bba9b539391d782",
     "css/bank.css": "dd928f34c6ca21b5776070b31e25cb4ac5b205243a8f2528f2f4d31df7176bcd",

@@ -21,10 +21,12 @@
 }
 
 .logo b {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  background: var(--green);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: url('../assets/icon.png') center/contain no-repeat;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 .logo span {
