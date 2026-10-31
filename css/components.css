@@ -24,7 +24,7 @@
   width: 34px;
   height: 34px;
   border-radius: 8px;
-  background: url('../assets/icon.png') center/contain no-repeat;
+  background: url('../assets/icon-v2.png') center/contain no-repeat;
   display: inline-block;
   flex-shrink: 0;
 }
